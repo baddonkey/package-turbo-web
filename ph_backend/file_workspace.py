@@ -388,7 +388,10 @@ class FileWorkspace:
                 for change in file_changes(before, after):
                     if change["path"] == "header/metadata.xml":
                         continue
-                    self.journal._append(connection, "file modification", agent_identifier=pending["operator"],
+                    event_type = ("file deletion" if change["before"] is not None
+                                  and change["before"]["type"] == "file" and change["after"] is None
+                                  else "file modification")
+                    self.journal._append(connection, event_type, agent_identifier=pending["operator"],
                                          software_version=pending["software_version"], detail=change,
                                          transaction_identifier=pending["transaction_id"])
             self.journal._append(connection, "package commit recovery" if recovered else "package commit",

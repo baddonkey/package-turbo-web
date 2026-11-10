@@ -3,10 +3,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from io import BytesIO
+from pathlib import Path
 from uuid import uuid4
 from zipfile import ZipFile, ZipInfo
 
 import pytest
+from lxml import etree
 from fastapi.testclient import TestClient as BaseTestClient
 
 from ph_backend.sip import SipPackage
@@ -557,6 +559,23 @@ def test_structure_and_primary_content_actions_reuse_package_transactions(client
                           json={"action": "delete-entry", "node_id": file_id})
     assert removed.status_code == 200, removed.text
     assert client.get(f"{base}/nodes/{folder['id']}/children").json()["items"] == []
+    deletion = next(event for event in client.get(base + "/history").json()["items"]
+                    if event["type"] == "file deletion")
+    payload = client.get(base + "/history/event/" + str(deletion["sequence"])).json()["payload"]
+    assert payload["detail"]["path"] == "content/Dossier/test.txt"
+    assert payload["detail"]["before"]["type"] == "file"
+    assert payload["detail"]["after"] is None
+    namespaces = {"p": "http://www.loc.gov/premis/v3"}
+    schema_path = Path(__file__).resolve().parents[1] / "ph_backend/resources/preservation/premis-v3-0.xsd"
+    for redacted in (True, False):
+        premis = client.get(base + "/history/premis", params={"redacted": str(redacted).lower()})
+        assert premis.status_code == 200, premis.text
+        root = etree.fromstring(premis.content)
+        exported = root.xpath("p:event[p:eventType='file deletion']", namespaces=namespaces)
+        assert len(exported) == 1
+        assert exported[0].findtext("p:eventIdentifier/p:eventIdentifierValue", namespaces=namespaces) == payload["eventIdentifier"]
+        assert exported[0].xpath("p:linkingObjectIdentifier/p:linkingObjectRole/text()", namespaces=namespaces) == ["source"]
+        etree.XMLSchema(etree.parse(str(schema_path))).assertValid(root)
     forbidden = client.post(base + "/actions", headers={"If-Match": f'"{removed.json()["revision"]}"'},
                              json={"action": "delete-entry", "node_id": content_id})
     assert forbidden.status_code == 422

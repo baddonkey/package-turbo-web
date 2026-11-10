@@ -190,6 +190,12 @@ Use **Paket → Paket zippen…** to export the committed SIP.
 
 ## Architecture and data
 
+Successful primary-file removals are recorded as `file deletion` in the journal
+and PREMIS, retaining the prior path, size and SHA-256 and linking the prior file
+state as a source object. This also applies to files removed within a deleted
+folder. Older signed `file modification` records are not rewritten; their
+`before`/`after` details still identify historical deletions.
+
 - `ph_backend` implements SIP loading, XML edits, validation, and preservation.
   `ph_web` owns HTTP contracts, input limits, and the private workspace store.
   The `web` extra contains the API server dependencies.

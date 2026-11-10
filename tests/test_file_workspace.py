@@ -95,6 +95,30 @@ def test_post_swap_interruption_recovers_success_once(tmp_path, monkeypatch):
     assert workspace.journal.records()[-1]["payload"]["outcome"] == "success"
 
 
+def test_file_deletion_is_recorded_once_after_commit_recovery(tmp_path, monkeypatch):
+    pkg, workspace, content = setup_workspace(tmp_path)
+    source = tmp_path / "deleted.txt"
+    source.write_bytes(b"original content")
+    workspace.stage_operation(pkg, lambda package: files.import_paths(package, content, [source]), [])
+    workspace.commit(pkg, [])
+    file = next(element for element in pkg.iter_kind("datei") if pkg.text(element, "name") == "deleted.txt")
+    workspace.stage_operation(pkg, lambda package: files.delete_entries(package, [file]), [])
+    assert not any(record["payload"]["eventType"] == "file deletion" for record in workspace.journal.records())
+    monkeypatch.setattr(workspace, "_finish", lambda *args: (_ for _ in ()).throw(SystemExit()))
+    with pytest.raises(SystemExit):
+        workspace.commit(pkg, [])
+    recover_file_commit(pkg.root_dir, "recovery-operator", "0.1.0")
+    count = workspace.journal.verify().sequence
+    recover_file_commit(pkg.root_dir, "recovery-operator", "0.1.0")
+    assert workspace.journal.verify().sequence == count
+    deletions = [record["payload"] for record in workspace.journal.records()
+                 if record["payload"]["eventType"] == "file deletion"]
+    assert len(deletions) == 1
+    assert deletions[0]["agentIdentifier"] == "operator"
+    assert deletions[0]["detail"]["path"] == "content/deleted.txt"
+    assert deletions[0]["detail"]["after"] is None
+
+
 def test_external_file_change_prevents_commit(tmp_path):
     pkg, workspace, content = setup_workspace(tmp_path)
     workspace.stage_operation(pkg, lambda package: files.create_folder(package, content, "new"), [])
