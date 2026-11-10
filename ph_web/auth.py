@@ -10,11 +10,13 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
+from uuid import UUID
 
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 
+from .database import ServiceDatabase
 from .storage import WebError
 
 LOG = logging.getLogger(__name__)
@@ -67,6 +69,7 @@ class Login(BaseModel):
 class Identity(BaseModel):
     subject: str
     display_name: str
+    user_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -77,9 +80,10 @@ class Session:
 
 
 class LocalAuth:
-    def __init__(self, settings: AuthSettings, operator: str):
+    def __init__(self, settings: AuthSettings, operator: str, database: ServiceDatabase | None = None):
         self.settings = settings
         self.identity = Identity(subject=settings.username, display_name=operator)
+        self.database = database
         self._sessions: dict[str, Session] = {}
         self._attempts: deque[float] = deque()
         self._lock = Lock()
@@ -87,6 +91,13 @@ class LocalAuth:
     def session(self, request: Request) -> Session | None:
         token = request.cookies.get(SESSION_COOKIE, "")
         key = hashlib.sha256(token.encode()).hexdigest()
+        if self.database is not None:
+            current = self.database.session(key, time.time())
+            if current is None:
+                return None
+            principal, csrf, expires = current
+            return Session(Identity(subject=principal.subject, display_name=principal.display_name,
+                                    user_id=principal.id), csrf, expires)
         with self._lock:
             session = self._sessions.get(key)
             if session and session.expires <= time.monotonic():
@@ -103,6 +114,10 @@ class LocalAuth:
             if not csrf or not hmac.compare_digest(csrf.encode(), session.csrf.encode()):
                 raise WebError(403, "Ungültiger Sicherheitstoken. Laden Sie die Seite neu.")
         request.state.identity = session.identity
+        if self.database is not None:
+            if session.identity.user_id is None:
+                raise WebError(401, "Bitte melden Sie sich an.")
+            request.state.principal = self.database.user(session.identity.user_id)
         return session
 
     def login(self, command: Login, request: Request, response: Response) -> Identity:
@@ -130,25 +145,40 @@ class LocalAuth:
             raise WebError(401, "Benutzername oder Passwort ist falsch.")
         token = secrets.token_urlsafe(32)
         csrf = secrets.token_urlsafe(32)
-        with self._lock:
-            self._sessions = {key: value for key, value in self._sessions.items() if value.expires > now}
-            if len(self._sessions) >= 1000:
+        previous = request.cookies.get(SESSION_COOKIE, "")
+        previous_hash = hashlib.sha256(previous.encode()).hexdigest()
+        identity = self.identity
+        if self.database is not None:
+            principal = self.database.register_user("urn:package-turbo:local", self.identity.subject,
+                                                    self.identity.display_name)
+            identity = Identity(subject=principal.subject, display_name=principal.display_name, user_id=principal.id)
+            timestamp = time.time()
+            if not self.database.create_session(hashlib.sha256(token.encode()).hexdigest(), principal, csrf,
+                                                timestamp + SESSION_SECONDS, previous_hash, timestamp):
                 raise WebError(503, "Zu viele aktive Sitzungen. Versuchen Sie es später erneut.")
-            previous = request.cookies.get(SESSION_COOKIE, "")
-            self._sessions.pop(hashlib.sha256(previous.encode()).hexdigest(), None)
-            self._sessions[hashlib.sha256(token.encode()).hexdigest()] = Session(
-                self.identity, csrf, now + SESSION_SECONDS,
-            )
+        else:
+            with self._lock:
+                self._sessions = {key: value for key, value in self._sessions.items() if value.expires > now}
+                if len(self._sessions) >= 1000:
+                    raise WebError(503, "Zu viele aktive Sitzungen. Versuchen Sie es später erneut.")
+                self._sessions.pop(previous_hash, None)
+                self._sessions[hashlib.sha256(token.encode()).hexdigest()] = Session(
+                    identity, csrf, now + SESSION_SECONDS,
+                )
         for name, value, http_only in ((SESSION_COOKIE, token, True), (CSRF_COOKIE, csrf, False)):
             response.set_cookie(name, value, max_age=SESSION_SECONDS, httponly=http_only,
                                 secure=self.settings.secure_cookie, samesite="strict", path="/")
-        return self.identity
+        return identity
 
     def logout(self, request: Request, response: Response) -> None:
         self.require(request)
         token = request.cookies.get(SESSION_COOKIE, "")
-        with self._lock:
-            self._sessions.pop(hashlib.sha256(token.encode()).hexdigest(), None)
+        key = hashlib.sha256(token.encode()).hexdigest()
+        if self.database is not None:
+            self.database.revoke_session(key)
+        else:
+            with self._lock:
+                self._sessions.pop(key, None)
         for name in (SESSION_COOKIE, CSRF_COOKIE):
             response.delete_cookie(name, path="/", secure=self.settings.secure_cookie, samesite="strict")
 

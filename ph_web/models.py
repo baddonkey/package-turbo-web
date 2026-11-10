@@ -36,6 +36,23 @@ class PackageSummary(BaseModel):
     metadata_only: bool = False
 
 
+class SharingGrant(BaseModel):
+    id: UUID
+    display_name: str
+    role: Literal["viewer", "editor"]
+
+
+class PackageSharing(BaseModel):
+    version: int
+    grants: list[SharingGrant]
+
+
+class SharingChange(Input):
+    user_id: UUID
+    role: Literal["viewer", "editor"] | None
+    version: Annotated[int, Field(ge=1)]
+
+
 class Node(BaseModel):
     id: str
     name: str

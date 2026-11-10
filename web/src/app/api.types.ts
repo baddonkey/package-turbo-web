@@ -543,6 +543,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/packages/{package_id}/sharing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sharing */
+        get: operations["get_sharing_api_v1_packages__package_id__sharing_get"];
+        /** Update Sharing */
+        put: operations["update_sharing_api_v1_packages__package_id__sharing_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/packages/{package_id}/statistics": {
         parameters: {
             query?: never;
@@ -722,6 +740,8 @@ export interface components {
             display_name: string;
             /** Subject */
             subject: string;
+            /** User Id */
+            user_id?: string | null;
         };
         /** Login */
         Login: {
@@ -970,6 +990,13 @@ export interface components {
              */
             system_name?: string;
         };
+        /** PackageSharing */
+        PackageSharing: {
+            /** Grants */
+            grants: components["schemas"]["SharingGrant"][];
+            /** Version */
+            version: number;
+        };
         /** PackageSummary */
         PackageSummary: {
             /** Delivery Type */
@@ -1097,6 +1124,33 @@ export interface components {
             hits: components["schemas"]["SearchHit"][];
             /** Revision */
             revision: string;
+        };
+        /** SharingChange */
+        SharingChange: {
+            /** Role */
+            role: ("viewer" | "editor") | null;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Version */
+            version: number;
+        };
+        /** SharingGrant */
+        SharingGrant: {
+            /** Display Name */
+            display_name: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "viewer" | "editor";
         };
         /** Statistic */
         Statistic: {
@@ -2346,6 +2400,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sharing_api_v1_packages__package_id__sharing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                package_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageSharing"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_sharing_api_v1_packages__package_id__sharing_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                package_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharingChange"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageSharing"];
                 };
             };
             /** @description Validation Error */

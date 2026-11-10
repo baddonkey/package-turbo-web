@@ -27,6 +27,11 @@ Open [Package Turbo](http://127.0.0.1:8000) or the
 Sign in with the configured local account first; API documentation also requires
 a session. Without configured credentials, workspace access remains locked.
 
+The service now stores durable sessions and owner-private package permissions.
+Existing workspaces need [explicit owner migration](docs/web-workspace.md#migrating-existing-workspaces).
+Keycloak login, bounded jobs and quotas are still pending; keep this deployment
+on loopback rather than exposing the local account as a shared service.
+
 The workspace provides German menus, classification and dossier/package
 navigators, a metadata editor, and a separate results pane. Use **Öffnen** to
 select a saved workspace or import a SIP ZIP.

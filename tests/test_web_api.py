@@ -1,7 +1,9 @@
 """Web contract regressions for import, editing, and recoverable preservation."""
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from io import BytesIO
+from uuid import uuid4
 from zipfile import ZipFile, ZipInfo
 
 import pytest
@@ -88,7 +90,7 @@ def test_create_edit_audit_and_export_survive_restart(client, web_settings):
         assert [item["type"] for item in events] == [
             "metadata commit", "web metadata edit", "metadata commit preparation",
         ]
-        assert {item["operator"] for item in events} == {"Archivist"}
+        assert {item["operator"] for item in events} == {restarted.get("/api/v1/auth/session").json()["user_id"]}
         export = restarted.get(base + "/export")
         assert export.status_code == 200
         assert export.headers["content-type"] == "application/zip"
@@ -115,6 +117,71 @@ def test_simultaneous_edits_to_same_revision_commit_only_once(client):
     assert client.get(delivery, headers=headers).status_code == 412
     winner = next(response for response in responses if response.status_code == 200)
     assert client.get(delivery).json()["node"] == winner.json()["node"]
+
+
+def test_all_package_routes_hide_private_packages_before_side_effects(client, web_settings, monkeypatch):
+    created = create(client)
+    package_id = created.json()["id"]
+    other_auth = AuthSettings(username="other", password_hash=TEST_AUTH.password_hash)
+    app = create_authenticated_app(web_settings, auth_settings=other_auth)
+    with BaseTestClient(app, base_url="http://localhost") as other:
+        assert other.post("/api/v1/auth/login", json={"username": "other", "password": TEST_PASSWORD}).status_code == 200
+        other.headers["X-XSRF-TOKEN"] = other.cookies[CSRF_COOKIE]
+        own = create(other)
+        assert [item["id"] for item in other.get(API).json()] == [own.json()["id"]]
+
+        def forbidden(*_args, **_kwargs):
+            pytest.fail("An unauthorized request touched package storage.")
+
+        monkeypatch.setattr(app.state.store, "open", forbidden)
+        monkeypatch.setattr(app.state.store, "staging", forbidden)
+        with ExitStack() as stack:
+            from unittest.mock import patch
+
+            stack.enter_context(patch("ph_web.app.tempfile.mkdtemp", side_effect=forbidden))
+            for route in app.routes:
+                if "{package_id}" not in getattr(route, "path", ""):
+                    continue
+                path = route.path.replace("{package_id}", package_id)
+                for parameter, value in {"node_id": "0", "group": "additional", "report": "delivery", "sequence": "1"}.items():
+                    path = path.replace("{" + parameter + "}", value)
+                for method in route.methods - {"HEAD", "OPTIONS"}:
+                    result = other.request(method, path, json={}, headers={"If-Match": created.headers["etag"]})
+                    assert result.status_code == 404, (method, path, result.text)
+        assert other.get(API + "/" + str(uuid4())).status_code == 404
+
+
+def test_owner_sharing_viewer_editor_and_revocation(client, web_settings):
+    created = create(client)
+    base = created.headers["location"]
+    delivery = node_url(client, base, "ablieferung")
+    other_auth = AuthSettings(username="other", password_hash=TEST_AUTH.password_hash)
+    app = create_authenticated_app(web_settings, auth_settings=other_auth)
+    with BaseTestClient(app, base_url="http://localhost") as other:
+        assert other.post("/api/v1/auth/login", json={"username": "other", "password": TEST_PASSWORD}).status_code == 200
+        other.headers["X-XSRF-TOKEN"] = other.cookies[CSRF_COOKIE]
+        user = app.state.store.database.register_user("urn:package-turbo:local", "other", "Other")
+        grant = {"user_id": str(user.id), "role": "viewer", "version": 1}
+        assert client.put(base + "/sharing", json=grant).json()["version"] == 2
+        assert other.get(base).status_code == 200
+        assert other.get(base + "/metadata.xml").status_code == 200
+        assert other.post(base + "/validation").status_code == 200
+        assert other.get(base + "/sharing").status_code == 403
+        assert other.get(base + "/storage/cleanup").status_code == 403
+        edit = {"tag": "ablieferndeStelle", "values": ["Shared editor"]}
+        assert other.patch(delivery + "/field", json=edit, headers={"If-Match": created.headers["etag"]}).status_code == 403
+        grant.update(role="editor", version=2)
+        assert client.put(base + "/sharing", json=grant).json()["version"] == 3
+        edited = other.patch(delivery + "/field", json=edit, headers={"If-Match": created.headers["etag"]})
+        assert edited.status_code == 200, edited.text
+        events = other.get(base + "/history").json()["items"]
+        assert {event["operator"] for event in events} == {str(user.id)}
+        assert other.put(base + "/sharing", json={**grant, "version": 3}).status_code == 403
+        assert client.put(base + "/sharing", json=grant).status_code == 412
+        assert client.put(base + "/sharing", json={**grant, "role": None, "version": 3}).json()["version"] == 4
+        assert other.get(base).status_code == 404
+        assert other.get(API).json() == []
+        assert client.get(API).json()[0]["revision"] == edited.headers["etag"].strip('"')
 
 
 def test_required_readonly_and_noop_edits(client):
@@ -189,11 +256,14 @@ def test_uploaded_xsd_does_not_drive_validation_or_editing(client, sip_dir):
 
 @pytest.mark.parametrize("member", ["../outside.txt", "content/../../outside.txt", "content/AUX.txt", "/outside.txt"])
 def test_reject_unsafe_archive_members_and_leave_no_workspace(client, web_settings, member):
+    before = set(web_settings.data_dir.iterdir())
     archive = BytesIO()
     with ZipFile(archive, "w") as output:
         output.writestr(member, b"data")
     assert upload(client, archive.getvalue()).status_code == 422
-    assert list(web_settings.data_dir.iterdir()) == []
+    assert set(web_settings.data_dir.iterdir()) == before
+    assert client.get(API).json() == []
+    assert client.app.state.store.database.pending_packages() == []
 
 
 def test_reject_archive_symlinks_and_case_collisions(client):
@@ -214,13 +284,16 @@ def test_reject_archive_symlinks_and_case_collisions(client):
 def test_upload_limits_cover_chunked_requests_and_expanded_members(tmp_path):
     settings = Settings(data_dir=tmp_path / "web", max_upload_bytes=200, max_expanded_bytes=16)
     with TestClient(create_app(settings), base_url="http://localhost") as client:
+        before = set(settings.data_dir.iterdir())
         assert upload(client, b"x" * 201).status_code == 413
         assert upload(client, iter([b"x" * 105, b"y" * 105])).status_code == 413
         archive = BytesIO()
         with ZipFile(archive, "w") as output:
             output.writestr("header/metadata.xml", "x" * 17)
         assert upload(client, archive.getvalue()).status_code == 413
-    assert list(settings.data_dir.iterdir()) == []
+        assert client.get(API).json() == []
+        assert client.app.state.store.database.pending_packages() == []
+    assert set(settings.data_dir.iterdir()) == before
 
 
 def test_structure_and_notes_use_same_preservation_boundary(client):

@@ -3,9 +3,9 @@
 The service is intended for a single trusted operator on a local machine. Bind
 it to loopback and run it under an account that can access the archival material.
 Local login protects the API, including downloads and API documentation.
-Shared hosting still requires per-workspace authorization, HTTPS, quotas
-and job isolation. The configured operator is a preservation label, not a
-separate account.
+The multi-user foundation now enforces per-package ownership and sharing,
+but shared hosting still requires Keycloak login, HTTPS, quotas and job isolation.
+Do not expose the local development login as a shared service.
 
 ## Development
 
@@ -45,15 +45,17 @@ Uvicorn launch, source it first with
 `. "$HOME/.config/package-turbo-web/login.env"`.
 
 Sessions use random opaque cookies, expire after eight hours, and are revoked
-on logout. The session cookie is HttpOnly and both cookies use SameSite=Strict.
+on logout. Only token hashes are stored in the service SQLite database; sessions
+survive application restarts and reloads. Disabled local service identities cannot
+use their existing sessions. The session cookie is HttpOnly and both cookies use SameSite=Strict.
 Mutating API calls require `X-XSRF-TOKEN` matching the session's `XSRF-TOKEN`
 cookie; Angular sends it automatically. API scripts must log in with JSON,
 retain both cookies and send that header for POST/PATCH/DELETE calls.
 No passwords or bearer tokens are stored in browser local storage.
 Login is limited to 20 attempts per minute per server process.
 
-Use one Uvicorn worker: sessions and the bounded login throttle are in memory.
-Restarting (including development reload) invalidates sessions. Session expiry
+Use one Uvicorn worker for now: the bounded local login throttle is still
+process-local, and heavy work still runs within requests. Session expiry
 returns the browser to login and unsaved edits must be re-entered. **Abmelden**
 asks for confirmation if edits are pending. Saved packages remain on the server.
 `/api/v1/health` and the static login page remain public.
@@ -69,8 +71,83 @@ The browser uses a dedicated authentication service and login shell.
 is **not connected yet**. A future integration should replace local credential
 verification with authorization-code flow and PKCE, validate issuer/audience
 and state/nonce, and retain server-side sessions and CSRF protection. Audit
-identity and package authorization must be mapped explicitly before enabling
-multiple users; the current account uses `PACKAGE_TURBO_OPERATOR` for audit events.
+identity must be mapped explicitly before enabling multiple users. Local identities
+use issuer `urn:package-turbo:local` and the configured login username as subject.
+`user_id` in the session response is the stable service identity UUID. Preservation
+events use this UUID as their agent identifier and web-edit details retain a
+display-name/issuer/subject snapshot. Notes and reports use the display name.
+`PACKAGE_TURBO_OPERATOR` supplies that display name for local login, not ownership.
+Recovery uses a service identity while preserving the prepared transaction's original actor.
+
+## Ownership and sharing foundation
+
+The private data directory now contains `service.sqlite3`, a versioned SQLite
+catalog using WAL and foreign keys, plus `catalog.lock`. It stores identities,
+hashed sessions, ownership, viewer/editor grants and sharing security events.
+It is separate from preservation journals and is not included in SIP exports.
+
+New and imported packages belong to the authenticated user. Package lists are
+filtered before pagination and do not open unrelated packages. Every package
+endpoint checks permissions before opening, recovery, uploads or export allocation,
+then rechecks under the existing package lock. Inaccessible IDs return 404;
+insufficient rights on an accessible package return 403. Different packages retain
+independent locks. Concurrent edits still require `If-Match` and return 412 on conflict.
+
+- Owners edit and manage sharing and retention cleanup.
+- Editors edit but cannot share or clean preservation history.
+- Viewers read, search, validate and export saved state, but cannot edit.
+
+Sharing is currently an API feature; there is no sharing UI or global user directory.
+The recipient must already have a known service identity. Owners read
+`GET /api/v1/packages/{id}/sharing` and update it with
+`PUT /api/v1/packages/{id}/sharing`, supplying JSON
+`{"user_id":"recipient-uuid","role":"viewer","version":1}`.
+Use `editor` to permit edits or `null` to revoke. The version is the separate ACL
+version from the GET response; stale changes return 412. The PUT requires CSRF.
+Revocation blocks future access, not bytes already downloaded or streaming.
+
+Publication records ownership as pending before the filesystem rename and ready
+after it. Startup reconciles registered pending publications under the catalog lock.
+Unregistered UUID folders remain inaccessible and are never assigned to the first
+user who logs in. Missing/invalid pending workspaces require review; unexplained
+directories and preservation companions are not deleted automatically.
+
+## Migrating existing workspaces
+
+Stop all API processes and back up the entire data directory, preservation companions
+and trusted checkpoints before migration. Restore to the same absolute paths.
+Explicitly select package UUIDs and verify the owner's issuer/subject with your
+identity administrator. For the existing local login, use
+`urn:package-turbo:local` and its configured username. For future Keycloak access,
+use the exact realm issuer and immutable Keycloak subject, not an email address.
+
+```sh
+uv run --locked --extra web python -m tools.migrate_web_workspaces \
+  --data-dir /absolute/path/to/workspaces \
+  --package-id 00000000-0000-0000-0000-000000000001 \
+  --issuer urn:package-turbo:local --subject archivist \
+  --display-name "Your name"
+```
+
+The default is a read-only dry run. Review the output, then repeat with `--apply`.
+Repeat `--package-id` to select several packages. Existing catalog ownership cannot
+be overwritten. Apply changes only catalog ownership and revokes all service sessions;
+SIP and preservation journal bytes and paths remain unchanged. If interrupted,
+let startup reconcile pending records and review which IDs remain unregistered
+before retrying. Assignments across several packages are not one atomic batch.
+Keep the original backup until migration and journal verification are complete.
+
+To revoke all sessions offline after a credential change or restore, stop the
+service and run:
+
+```sh
+uv run --locked --extra web python -c \
+  'from pathlib import Path; from ph_web.database import ServiceDatabase; ServiceDatabase(Path("/absolute/path/to/workspaces/service.sqlite3")).revoke_all_sessions()'
+```
+
+Remaining shared-service work: Keycloak authorization-code/PKCE integration and
+account-deactivation policy, bounded durable jobs, quotas and free-space reservations,
+role-aware sharing/progress UI, and supervised HTTPS deployment with capacity testing.
 
 ## Using the browser workspace
 
@@ -131,6 +208,8 @@ Use **Paket → Paket zippen…** to export the committed SIP.
 | `PACKAGE_TURBO_TRUSTED_STATE_DIR` | OS user state directory | Parent of the preservation checkpoint directory |
 
 Use a private local filesystem with space for staged and rollback copies.
+Back up `service.sqlite3` together with package directories, companions and trusted
+checkpoints while all writers are stopped; preserve paths and revoke restored sessions.
 Imports also cap ZIP entry count at 10,000 and depth at 40. Full validation,
 content commits, and ZIP exports run within the request. Interrupted staging
 that cannot be verified requires manual review. Workspaces and retained copies

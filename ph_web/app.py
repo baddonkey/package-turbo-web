@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import anyio
-from fastapi import APIRouter, FastAPI, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,11 +33,13 @@ from ph_backend.workspace import MetadataWorkspace, companion_directory
 
 from .actions import FILE_ACTIONS, content_entry, file_action, metadata_action
 from .auth import AuthSettings, LocalAuth
+from .authorization import authorize_package_request, package_permission
+from .database import AccessDenied
 from .metadata import MetadataView, xml_bytes
 from .models import (
     AdvancedSearch, AuditEvent, CheckResult, ChildCreate, CleanupPreview, FieldEdit, History, MetadataBatch, MetadataCommit, MetadataEdit, MetadataPreview, NameValues, NodeDetail, NodePage, NoteCreate,
     NoteRow, NotesPage, PackageAction, PackageCreate,
-    PackageSummary, ReferenceEdit, SampleResult, SampleRow, SearchHit, SearchOption, SearchResult, Statistics, ValidationFix, ValidationIssue, ValidationResult,
+    PackageSharing, PackageSummary, ReferenceEdit, SampleResult, SampleRow, SearchHit, SearchOption, SearchResult, SharingChange, Statistics, ValidationFix, ValidationIssue, ValidationResult,
 )
 from .storage import WEB_SOFTWARE_VERSION, OpenPackage, PackageStore, Settings, WebError, safe_part
 
@@ -52,7 +54,7 @@ Limit = Annotated[int, Query(ge=1, le=200)]
 def create_app(settings: Settings | None = None, static_dir: Path | None = None,
                auth_settings: AuthSettings | None = None) -> FastAPI:
     store = PackageStore(settings or Settings.from_env())
-    auth = LocalAuth(auth_settings or AuthSettings.from_env(), store.settings.operator)
+    auth = LocalAuth(auth_settings or AuthSettings.from_env(), store.settings.operator, store.database)
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -60,8 +62,9 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
         yield
 
     app = FastAPI(title="Package Turbo API", version="1.0.0", lifespan=lifespan, docs_url=None)
+    app.state.store = store
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(store.settings.allowed_hosts), www_redirect=False)
-    api = APIRouter(prefix=API_PREFIX)
+    api = APIRouter(prefix=API_PREFIX, dependencies=[Depends(authorize_package_request)])
     app.include_router(auth.router())
     app.middleware("http")(auth.middleware)
 
@@ -76,6 +79,10 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
 
     @app.exception_handler(WebError)
     async def web_error(_request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+
+    @app.exception_handler(AccessDenied)
+    async def access_denied(_request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=exc.status)
 
     @app.exception_handler(AuditError)
@@ -96,28 +103,34 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    def workspace(current: OpenPackage) -> MetadataWorkspace:
+    def actor(request: Request) -> dict:
+        principal = request.state.principal
+        return {"id": str(principal.id), "issuer": principal.issuer, "subject": principal.subject,
+                "displayName": principal.display_name}
+
+    def workspace(current: OpenPackage, request: Request) -> MetadataWorkspace:
         return MetadataWorkspace(
-            current.sip.metadata_path, current.sip.root_dir, operator=store.settings.operator,
+            current.sip.metadata_path, current.sip.root_dir, operator=str(request.state.principal.id),
             software_version=WEB_SOFTWARE_VERSION,
         )
 
     @contextmanager
-    def opened(package_id: UUID, if_match: str | None = None):
-        with store.open(package_id) as current:
+    def opened(request: Request, package_id: UUID, if_match: str | None = None):
+        with store.open(package_id, request.state.principal, package_permission(request)) as current:
             journal = companion_directory(current.sip.root_dir) / "journal.sqlite3"
             if journal.is_file():
                 # Reconcile interrupted commits before exposing their revision.
-                metadata = workspace(current)
+                metadata = MetadataWorkspace(current.sip.metadata_path, current.sip.root_dir,
+                                             operator="package-turbo recovery service", software_version=WEB_SOFTWARE_VERSION)
                 if has_file_draft(metadata.journal):
                     FileWorkspace(metadata).discard()
             if if_match is not None and if_match != current.etag:
                 raise WebError(412, "This SIP changed. Reload the workspace before continuing.")
             yield current
 
-    def mutation(package_id: UUID, node_id: str, if_match: str, response: Response, event: str,
+    def mutation(request: Request, package_id: UUID, node_id: str, if_match: str, response: Response, event: str,
                  operation: Callable, detail: dict) -> NodeDetail:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             if current.sip.read_only:
                 raise WebError(409, "This SIP schema version is read-only.")
             view = MetadataView(current)
@@ -129,9 +142,9 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
                 raise WebError(422, str(exc)) from exc
             after = xml_bytes(current.sip)
             if after != before:
-                metadata_workspace = workspace(current)
+                metadata_workspace = workspace(current, request)
                 if metadata_workspace.save(after, [{
-                    "event_type": event, "detail": {"objectId": node_id, **detail},
+                    "event_type": event, "detail": {"objectId": node_id, **detail, "actor": actor(request)},
                 }]):
                     current = OpenPackage(current.id, current.sip, digest_bytes(after))
             response.headers["ETag"] = current.etag
@@ -142,13 +155,13 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
         return {"status": "ok"}
 
     @api.get("/packages")
-    def list_packages(offset: Offset = 0, limit: Limit = 50) -> list[PackageSummary]:
-        return store.list(offset, limit)
+    def list_packages(request: Request, offset: Offset = 0, limit: Limit = 50) -> list[PackageSummary]:
+        return store.list(request.state.principal, offset, limit)
 
     @api.post("/packages", status_code=201)
-    def new_package(command: PackageCreate, response: Response) -> PackageSummary:
+    def new_package(request: Request, command: PackageCreate, response: Response) -> PackageSummary:
         try:
-            result = store.create(command)
+            result = store.create(command, request.state.principal)
         except (ValueError, structure.StructureError) as exc:
             raise WebError(422, str(exc)) from exc
         response.headers["Location"] = f"{API_PREFIX}/packages/{result.id}"
@@ -189,7 +202,7 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
         with store.staging() as temporary:
             source = temporary / "upload.zip"
             await receive_upload(request, source)
-            result = await anyio.to_thread.run_sync(store.import_zip, source, name, read_only)
+            result = await anyio.to_thread.run_sync(store.import_zip, source, name, read_only, request.state.principal)
         response.headers["Location"] = f"{API_PREFIX}/packages/{result.id}"
         response.headers["ETag"] = f'"{result.revision}"'
         return result
@@ -204,28 +217,43 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
         with store.staging() as temporary:
             source = temporary / "metadata.xml"
             await receive_upload(request, source)
-            result = await anyio.to_thread.run_sync(store.import_metadata, source, name)
+            result = await anyio.to_thread.run_sync(store.import_metadata, source, name, request.state.principal)
         response.headers["Location"] = f"{API_PREFIX}/packages/{result.id}"
         response.headers["ETag"] = f'"{result.revision}"'
         return result
 
     @api.get("/packages/{package_id}")
-    def get_package(package_id: UUID, response: Response) -> PackageSummary:
-        with opened(package_id) as current:
+    def get_package(request: Request, package_id: UUID, response: Response) -> PackageSummary:
+        with opened(request, package_id) as current:
             response.headers["ETag"] = current.etag
             return current.summary()
 
+    @api.get("/packages/{package_id}/sharing")
+    def get_sharing(request: Request, package_id: UUID) -> PackageSharing:
+        with store.access(package_id, request.state.principal, "manage"):
+            return PackageSharing.model_validate(store.database.sharing(package_id, request.state.principal))
+
+    @api.put("/packages/{package_id}/sharing")
+    def update_sharing(request: Request, package_id: UUID, command: SharingChange) -> PackageSharing:
+        with store.access(package_id, request.state.principal, "manage"):
+            try:
+                result = store.database.set_grant(package_id, request.state.principal, command.user_id,
+                                                  command.role, command.version)
+            except ValueError as exc:
+                raise WebError(422, str(exc)) from exc
+            return PackageSharing.model_validate(result)
+
     @api.get("/packages/{package_id}/nodes/{node_id}")
-    def get_node(package_id: UUID, node_id: str, response: Response, if_match: IfMatch = None) -> NodeDetail:
-        with opened(package_id, if_match) as current:
+    def get_node(request: Request, package_id: UUID, node_id: str, response: Response, if_match: IfMatch = None) -> NodeDetail:
+        with opened(request, package_id, if_match) as current:
             view = MetadataView(current)
             response.headers["ETag"] = current.etag
             return view.detail(view.element(node_id), node_id)
 
     @api.get("/packages/{package_id}/nodes/{node_id}/children")
-    def list_children(package_id: UUID, node_id: str, if_match: IfMatch = None,
+    def list_children(request: Request, package_id: UUID, node_id: str, if_match: IfMatch = None,
                       offset: Offset = 0, limit: Limit = 50) -> NodePage:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             view = MetadataView(current)
             element = view.element(node_id)
             children = view.children(element)
@@ -238,9 +266,9 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             )
 
     @api.get("/packages/{package_id}/dossiers")
-    def list_dossiers(package_id: UUID, if_match: IfMatch = None,
+    def list_dossiers(request: Request, package_id: UUID, if_match: IfMatch = None,
                       offset: Offset = 0, limit: Limit = 50) -> NodePage:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             view = MetadataView(current)
             dossiers = [element for element in current.sip.iter_kind("dossier") if current.sip.kind(element) == "dossier"]
             return NodePage(
@@ -260,10 +288,10 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
         return element
 
     @api.post("/packages/{package_id}/metadata/preview")
-    def preview_metadata(package_id: UUID, command: MetadataEdit,
+    def preview_metadata(request: Request, package_id: UUID, command: MetadataEdit,
                          if_match: Annotated[str, Header()]) -> MetadataPreview:
         """Validate one edit against the saved revision without writing it."""
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             before = xml_bytes(current.sip)
             view = MetadataView(current)
             element = apply_metadata_edit(view, command)
@@ -271,10 +299,10 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             return MetadataPreview(field=field, changed=xml_bytes(current.sip) != before)
 
     @api.post("/packages/{package_id}/metadata/commit")
-    def commit_metadata(package_id: UUID, command: MetadataBatch, response: Response,
+    def commit_metadata(request: Request, package_id: UUID, command: MetadataBatch, response: Response,
                         if_match: Annotated[str, Header()]) -> MetadataCommit:
         """Validate and persist all pending field edits in one recoverable commit."""
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             before = xml_bytes(current.sip)
             view = MetadataView(current)
             touched = {}
@@ -288,10 +316,10 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
                 element = apply_metadata_edit(view, entry)
                 touched[entry.node_id] = element
                 events.append({"event_type": "web metadata edit", "detail": {
-                    "objectId": entry.node_id, "field": entry.edit.tag,
+                    "objectId": entry.node_id, "field": entry.edit.tag, "actor": actor(request),
                 }})
             after = xml_bytes(current.sip)
-            if before != after and workspace(current).save(after, events):
+            if before != after and workspace(current, request).save(after, events):
                 current = OpenPackage(current.id, current.sip, digest_bytes(after))
             response.headers["ETag"] = current.etag
             updated = MetadataView(current)
@@ -300,13 +328,13 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             ])
 
     @api.patch("/packages/{package_id}/nodes/{node_id}/field")
-    def update_field(package_id: UUID, node_id: str, command: FieldEdit, response: Response,
+    def update_field(request: Request, package_id: UUID, node_id: str, command: FieldEdit, response: Response,
                      if_match: Annotated[str, Header()]) -> NodeDetail:
-        return mutation(package_id, node_id, if_match, response, "web metadata edit",
+        return mutation(request, package_id, node_id, if_match, response, "web metadata edit",
                         lambda view, element: view.edit(element, command), {"field": command.tag})
 
     @api.put("/packages/{package_id}/nodes/{node_id}/properties/{group}")
-    def update_properties(package_id: UUID, node_id: str, group: Literal["additional", "file"],
+    def update_properties(request: Request, package_id: UUID, node_id: str, group: Literal["additional", "file"],
                           command: NameValues, response: Response, if_match: Annotated[str, Header()]) -> NodeDetail:
         def edit(view: MetadataView, element):
             detail = view.detail(element, node_id)
@@ -317,31 +345,32 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
                 view.sip.set_file_properties(element, values)
             else:
                 raise WebError(422, "Eigenschaften werden für dieses Objekt nicht unterstützt.")
-        return mutation(package_id, node_id, if_match, response, "web property edit", edit, {"group": group})
+        return mutation(request, package_id, node_id, if_match, response, "web property edit", edit, {"group": group})
 
     @api.patch("/packages/{package_id}/nodes/{node_id}/reference-attribute")
-    def update_reference_attribute(package_id: UUID, node_id: str, command: ReferenceEdit, response: Response,
+    def update_reference_attribute(request: Request, package_id: UUID, node_id: str, command: ReferenceEdit, response: Response,
                                    if_match: Annotated[str, Header()]) -> NodeDetail:
-        return mutation(package_id, node_id, if_match, response, "web reference attribute edit",
+        return mutation(request, package_id, node_id, if_match, response, "web reference attribute edit",
                         lambda view, element: view.sip.set_reference_attribute(element, command.index, command.name, command.value),
                         {"field": command.name, "referenceIndex": command.index})
 
     @api.post("/packages/{package_id}/nodes/{node_id}/children")
-    def add_child(package_id: UUID, node_id: str, command: ChildCreate, response: Response,
+    def add_child(request: Request, package_id: UUID, node_id: str, command: ChildCreate, response: Response,
                   if_match: Annotated[str, Header()]) -> NodeDetail:
-        return mutation(package_id, node_id, if_match, response, "web structure creation",
+        return mutation(request, package_id, node_id, if_match, response, "web structure creation",
                         lambda view, element: structure.add_objects(view.sip, element, command.kind, title=command.title),
                         {"kind": command.kind})
 
     @api.post("/packages/{package_id}/nodes/{node_id}/notes")
-    def add_note(package_id: UUID, node_id: str, command: NoteCreate, response: Response,
+    def add_note(request: Request, package_id: UUID, node_id: str, command: NoteCreate, response: Response,
                  if_match: Annotated[str, Header()]) -> NodeDetail:
-        return mutation(package_id, node_id, if_match, response, "web note creation",
-                        lambda view, element: notes.add_note(view.sip, element, command.text, store.settings.operator),
+        return mutation(request, package_id, node_id, if_match, response, "web note creation",
+                        lambda view, element: notes.add_note(view.sip, element, command.text, request.state.identity.display_name),
                         {})
 
-    def stage_file_action(current: OpenPackage, action: Callable, event: dict, *, force=False) -> None:
-        transaction = FileWorkspace(workspace(current))
+    def stage_file_action(request: Request, current: OpenPackage, action: Callable, event: dict, *, force=False) -> None:
+        transaction = FileWorkspace(workspace(current, request))
+        event = {**event, "detail": {**event["detail"], "actor": actor(request)}}
 
         def apply(_staged):
             before = xml_bytes(current.sip)
@@ -354,29 +383,29 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             transaction.commit(current.sip, [event])
 
     @api.post("/packages/{package_id}/actions")
-    def package_action(package_id: UUID, command: PackageAction,
+    def package_action(request: Request, package_id: UUID, command: PackageAction,
                        if_match: Annotated[str, Header()]) -> PackageSummary:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             if current.sip.read_only:
                 raise WebError(409, "This SIP schema version is read-only.")
             event = {"event_type": "web package operation", "detail": {
-                "action": command.action, "objectId": command.node_id,
+                "action": command.action, "objectId": command.node_id, "actor": actor(request),
             }}
             try:
                 if command.action in FILE_ACTIONS:
-                    stage_file_action(current, lambda view: file_action(view, command), event)
+                    stage_file_action(request, current, lambda view: file_action(view, command), event)
                 else:
                     before = xml_bytes(current.sip)
                     metadata_action(MetadataView(current), command)
                     after = xml_bytes(current.sip)
                     if before != after:
-                        workspace(current).save(after, [event])
+                        workspace(current, request).save(after, [event])
             except (files.FileOperationError, structure.StructureError, ValueError, FileExistsError) as exc:
                 raise WebError(422, str(exc)) from exc
             return OpenPackage(current.id, current.sip, digest_bytes(current.sip.metadata_path.read_bytes())).summary()
 
-    def replace_content_file(package_id: UUID, node_id: str, if_match: str, source: Path) -> PackageSummary:
-        with opened(package_id, if_match) as current:
+    def replace_content_file(request: Request, package_id: UUID, node_id: str, if_match: str, source: Path) -> PackageSummary:
+        with opened(request, package_id, if_match) as current:
             if current.sip.read_only:
                 raise WebError(409, "This SIP schema version is read-only.")
 
@@ -387,7 +416,7 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
                 files.replace_file(view.sip, target, source)
 
             try:
-                stage_file_action(current, replace, {"event_type": "web content replacement", "detail": {"objectId": node_id}}, force=True)
+                stage_file_action(request, current, replace, {"event_type": "web content replacement", "detail": {"objectId": node_id}}, force=True)
             except (files.FileOperationError, ValueError) as exc:
                 raise WebError(422, str(exc)) from exc
             return OpenPackage(current.id, current.sip, digest_bytes(current.sip.metadata_path.read_bytes())).summary()
@@ -402,17 +431,19 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
         with store.staging() as temporary:
             source = temporary / "replacement"
             await receive_upload(request, source)
-            return await anyio.to_thread.run_sync(replace_content_file, package_id, node_id, if_match, source)
+            return await anyio.to_thread.run_sync(replace_content_file, request, package_id, node_id, if_match, source)
 
-    def commit_attachment(package_id: UUID, node_id: str, if_match: str, source: Path) -> NodeDetail:
-        with opened(package_id, if_match) as current:
+    def commit_attachment(request: Request, package_id: UUID, node_id: str, if_match: str, source: Path) -> NodeDetail:
+        with opened(request, package_id, if_match) as current:
             if current.sip.read_only:
                 raise WebError(409, "This SIP schema version is read-only.")
             view = MetadataView(current)
             if view.upload_folder(view.element(node_id)) is None:
                 raise WebError(422, "This object cannot receive content files.")
-            transaction = FileWorkspace(workspace(current))
-            events = [{"event_type": "web content import", "detail": {"objectId": node_id, "name": source.name}}]
+            transaction = FileWorkspace(workspace(current, request))
+            events = [{"event_type": "web content import", "detail": {
+                "objectId": node_id, "name": source.name, "actor": actor(request),
+            }}]
 
             def attach(_staged):
                 view.attach(view.element(node_id), source)
@@ -441,14 +472,14 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
         with store.staging() as temporary:
             source = temporary / name
             await receive_upload(request, source)
-            result = await anyio.to_thread.run_sync(commit_attachment, package_id, node_id, if_match, source)
+            result = await anyio.to_thread.run_sync(commit_attachment, request, package_id, node_id, if_match, source)
         response.headers["ETag"] = f'"{result.revision}"'
         return result
 
     @api.get("/packages/{package_id}/search")
-    def search_package(package_id: UUID, q: Annotated[str, Query(min_length=1, max_length=160)],
+    def search_package(request: Request, package_id: UUID, q: Annotated[str, Query(min_length=1, max_length=160)],
                        if_match: IfMatch = None) -> SearchResult:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             view = MetadataView(current)
             try:
                 rows = search.simple_search(current.sip, q, max_hits=500)
@@ -466,13 +497,13 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
                 for kind in (*search.SEARCHABLE_KINDS, "subdossier")}
 
     @api.post("/packages/{package_id}/search/advanced")
-    def advanced_search_package(package_id: UUID, command: AdvancedSearch, if_match: IfMatch = None) -> SearchResult:
+    def advanced_search_package(request: Request, package_id: UUID, command: AdvancedSearch, if_match: IfMatch = None) -> SearchResult:
         if command.kind not in (*search.SEARCHABLE_KINDS, "subdossier"):
             raise WebError(422, "Unbekannter Objekttyp.")
         labels = {field["tag"]: field["label"] for field in search.searchable_fields(command.kind)}
         if any(criterion.tag not in labels for criterion in command.criteria):
             raise WebError(422, "Unbekanntes Metadatum für diesen Objekttyp.")
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             view = MetadataView(current)
             criteria = [search.Criterion(command.kind, field.tag, field.value, field.empty) for field in command.criteria]
             try:
@@ -487,11 +518,11 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             ])
 
     @api.get("/packages/{package_id}/sample")
-    def sample_dossiers(package_id: UUID, mode: Literal["absolute", "percent"] = "absolute",
+    def sample_dossiers(request: Request, package_id: UUID, mode: Literal["absolute", "percent"] = "absolute",
                         size: Annotated[int, Query(ge=1, le=500)] = 10, if_match: IfMatch = None) -> SampleResult:
         if mode == "percent" and size > 100:
             raise WebError(422, "Prozentwert muss zwischen 1 und 100 liegen.")
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             view = MetadataView(current)
             rows = sampling.draw_sample(current.sip, mode, size)
             if len(rows) > 500:
@@ -503,20 +534,20 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
 
     @api.get("/packages/{package_id}/metadata.xml", response_class=Response,
              responses={200: {"content": {"application/xml": {"schema": {"type": "string", "format": "binary"}}}}})
-    def export_metadata(package_id: UUID):
-        with opened(package_id) as current:
+    def export_metadata(request: Request, package_id: UUID):
+        with opened(request, package_id) as current:
             return Response(current.sip.metadata_path.read_bytes(), media_type="application/xml",
                             headers={"Content-Disposition": 'attachment; filename="metadata.xml"'})
 
     @api.get("/packages/{package_id}/reports/{report}", response_class=HTMLResponse)
-    def package_report(package_id: UUID, report: Literal["classification", "dossiers", "delivery"]):
-        with opened(package_id) as current:
-            return HTMLResponse(reports.build_html(current.sip, report, store.settings.operator))
+    def package_report(request: Request, package_id: UUID, report: Literal["classification", "dossiers", "delivery"]):
+        with opened(request, package_id) as current:
+            return HTMLResponse(reports.build_html(current.sip, report, request.state.identity.display_name))
 
     @api.post("/packages/{package_id}/validation")
-    def validate(package_id: UUID, mode: Literal["metadata", "full"] = "metadata",
+    def validate(request: Request, package_id: UUID, mode: Literal["metadata", "full"] = "metadata",
                  if_match: IfMatch = None) -> ValidationResult:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             view = MetadataView(current)
             full = mode == "full" and not current.metadata_only
             rows = Validator(current.sip, validate_packaged_schema=False).run(full=full)
@@ -544,9 +575,9 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             )
 
     @api.post("/packages/{package_id}/validation/fix")
-    def fix_validation(package_id: UUID, command: ValidationFix,
+    def fix_validation(request: Request, package_id: UUID, command: ValidationFix,
                        if_match: Annotated[str, Header()]) -> PackageSummary:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             if current.sip.read_only:
                 raise WebError(409, "This SIP schema version is read-only.")
             view = MetadataView(current)
@@ -559,24 +590,26 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             ]
             if not selected:
                 raise WebError(409, "Der ausgewählte Validierungshinweis ist nicht mehr vorhanden.")
-            event = {"event_type": "web validation correction", "detail": {"action": command.action, "checkId": command.check_id}}
+            event = {"event_type": "web validation correction", "detail": {
+                "action": command.action, "checkId": command.check_id, "actor": actor(request),
+            }}
             try:
                 if command.action in fixes.FILE_SYSTEM_ACTIONS:
-                    stage_file_action(current, lambda staged: fixes.apply(staged.sip, command.action, selected), event, force=True)
+                    stage_file_action(request, current, lambda staged: fixes.apply(staged.sip, command.action, selected), event, force=True)
                 else:
                     before = xml_bytes(current.sip)
                     fixes.apply(current.sip, command.action, selected)
                     after = xml_bytes(current.sip)
                     if before != after:
-                        workspace(current).save(after, [event])
+                        workspace(current, request).save(after, [event])
             except (files.FileOperationError, structure.StructureError, ValueError, FileExistsError) as exc:
                 raise WebError(422, str(exc)) from exc
             return OpenPackage(current.id, current.sip, digest_bytes(current.sip.metadata_path.read_bytes())).summary()
 
     @api.get("/packages/{package_id}/notes")
-    def list_notes(package_id: UUID, if_match: IfMatch = None,
+    def list_notes(request: Request, package_id: UUID, if_match: IfMatch = None,
                    offset: Offset = 0, limit: Limit = 50) -> NotesPage:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             view = MetadataView(current)
             rows = notes.all_notes(current.sip)
             return NotesPage(
@@ -589,15 +622,15 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             )
 
     @api.get("/packages/{package_id}/statistics")
-    def get_statistics(package_id: UUID, if_match: IfMatch = None) -> Statistics:
-        with opened(package_id, if_match) as current:
+    def get_statistics(request: Request, package_id: UUID, if_match: IfMatch = None) -> Statistics:
+        with opened(request, package_id, if_match) as current:
             return Statistics.model_validate(statistics.overview(current.sip))
 
     @api.get("/packages/{package_id}/history")
-    def history(package_id: UUID, offset: Offset = 0, limit: Limit = 50) -> History:
-        with opened(package_id) as current:
+    def history(request: Request, package_id: UUID, offset: Offset = 0, limit: Limit = 50) -> History:
+        with opened(request, package_id) as current:
             journal = companion_directory(current.sip.root_dir) / "journal.sqlite3"
-            records = workspace(current).journal.records() if journal.is_file() else []
+            records = workspace(current, request).journal.records() if journal.is_file() else []
             rows = []
             for record in records[::-1][offset:offset + limit]:
                 payload = record["payload"]
@@ -608,68 +641,69 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             return History(items=rows, next_offset=offset + limit if len(records) > offset + limit else None)
 
     @api.get("/packages/{package_id}/history/event/{sequence}")
-    def history_event(package_id: UUID, sequence: int) -> dict:
-        with opened(package_id) as current:
+    def history_event(request: Request, package_id: UUID, sequence: int) -> dict:
+        with opened(request, package_id) as current:
             journal = companion_directory(current.sip.root_dir) / "journal.sqlite3"
-            records = workspace(current).journal.records() if journal.is_file() else []
+            records = workspace(current, request).journal.records() if journal.is_file() else []
             if sequence < 1 or sequence > len(records):
                 raise WebError(404, "Historienereignis nicht gefunden.")
             return records[sequence - 1]
 
     @api.get("/packages/{package_id}/storage/cleanup")
-    def preview_cleanup(package_id: UUID, keep_count: Annotated[int, Query(ge=1, le=100)] = 3,
+    def preview_cleanup(request: Request, package_id: UUID, keep_count: Annotated[int, Query(ge=1, le=100)] = 3,
                         minimum_age_days: Annotated[int, Query(ge=0, le=3650)] = 7,
                         if_match: IfMatch = None) -> CleanupPreview:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             if current.sip.read_only:
                 raise WebError(409, "Schreibgeschützte Pakete können nicht bereinigt werden.")
-            return CleanupPreview.model_validate(RetentionManager(workspace(current)).preview(keep_count, minimum_age_days))
+            return CleanupPreview.model_validate(RetentionManager(workspace(current, request)).preview(keep_count, minimum_age_days))
 
     @api.post("/packages/{package_id}/storage/cleanup")
-    def apply_cleanup(package_id: UUID, command: CleanupPreview,
+    def apply_cleanup(request: Request, package_id: UUID, command: CleanupPreview,
                       if_match: Annotated[str, Header()]) -> dict[str, int]:
-        with opened(package_id, if_match) as current:
+        with opened(request, package_id, if_match) as current:
             if current.sip.read_only:
                 raise WebError(409, "Schreibgeschützte Pakete können nicht bereinigt werden.")
-            manager = RetentionManager(workspace(current))
+            manager = RetentionManager(workspace(current, request))
             preview = manager.preview(command.keepCount, command.minimumAgeDays)
             if preview != command.model_dump():
                 raise WebError(409, "Die Vorschau ist nicht mehr aktuell. Prüfen Sie eine neue Vorschau.")
             return {"removed_bytes": manager.apply(preview)}
 
     @api.get("/packages/{package_id}/history/premis", response_class=Response)
-    def export_premis(package_id: UUID, redacted: bool = True):
-        with opened(package_id) as current:
+    def export_premis(request: Request, package_id: UUID, redacted: bool = True):
+        with opened(request, package_id) as current:
             journal_path = companion_directory(current.sip.root_dir) / "journal.sqlite3"
             if not journal_path.is_file():
                 raise WebError(404, "Das Paket besitzt noch keine Metadaten-Historie.")
-            journal = workspace(current).journal
+            journal = workspace(current, request).journal
             checkpoint = journal.verify()
             metadata = current.sip.metadata_path.read_bytes()
             inventory = manifest(current.sip.root_dir)
             data = journal.premis_xml(redact_values=redacted, metadata_xml=metadata, sip_manifest=inventory)
             if inventory != manifest(current.sip.root_dir) or checkpoint != journal.verify():
                 raise WebError(409, "Paket oder Historie wurden während des Exports geändert.")
-            journal.append("preservation export", agent_identifier=store.settings.operator,
+            journal.append("preservation export", agent_identifier=str(request.state.principal.id),
                            software_version=WEB_SOFTWARE_VERSION, detail={
                                "scope": "companion-export", "format": "PREMIS 3.0", "redacted": redacted,
                                "sourceSequence": checkpoint.sequence, "sourceDigest": checkpoint.digest,
+                               "actor": actor(request),
                            })
             return Response(data, media_type="application/xml", headers={
                 "Content-Disposition": 'attachment; filename="premis.xml"',
             })
 
     @api.get("/packages/{package_id}/history/bundle", response_class=FileResponse)
-    def export_audit_bundle(package_id: UUID, version: Literal["2", "1.12.1"] = "2", redacted: bool = True):
+    def export_audit_bundle(request: Request, package_id: UUID, version: Literal["2", "1.12.1"] = "2", redacted: bool = True):
         temporary = Path(tempfile.mkdtemp(prefix=".audit-export-", dir=store.root))
         archive = temporary / "preservation.zip"
         try:
-            with opened(package_id) as current:
+            with opened(request, package_id) as current:
                 journal = companion_directory(current.sip.root_dir) / "journal.sqlite3"
                 if not journal.is_file():
                     raise WebError(404, "Das Paket besitzt noch keine Metadaten-Historie.")
                 result = build_audit_bundle(current.sip.root_dir, journal, temporary, redacted,
-                                            version, store.settings.operator, WEB_SOFTWARE_VERSION)
+                                            version, str(request.state.principal.id), WEB_SOFTWARE_VERSION)
                 if result["auditError"]:
                     LOG.warning("Preservation export could not record its audit event: %s", result["auditError"])
                 with ZipFile(archive, "w", ZIP_STORED) as output:
@@ -683,8 +717,8 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
 
     @api.get("/packages/{package_id}/nodes/{node_id}/content", response_class=FileResponse,
              responses={200: {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})
-    def download_content(package_id: UUID, node_id: str, revision: Annotated[str, Query(pattern="^[0-9a-f]{64}$")]):
-        with opened(package_id, f'"{revision}"') as current:
+    def download_content(request: Request, package_id: UUID, node_id: str, revision: Annotated[str, Query(pattern="^[0-9a-f]{64}$")]):
+        with opened(request, package_id, f'"{revision}"') as current:
             view = MetadataView(current)
             path = view.content_path(view.element(node_id))
             if path is None:
@@ -705,11 +739,11 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
 
     @api.get("/packages/{package_id}/export", response_class=FileResponse,
              responses={200: {"content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}}}})
-    def export_package(package_id: UUID, if_match: IfMatch = None):
+    def export_package(request: Request, package_id: UUID, if_match: IfMatch = None):
         temporary = Path(tempfile.mkdtemp(prefix=".export-", dir=store.root))
         archive = temporary / "package.zip"
         try:
-            with opened(package_id, if_match) as current:
+            with opened(request, package_id, if_match) as current:
                 if current.metadata_only:
                     raise WebError(422, "Eine einzelne Metadatendatei kann nicht als SIP exportiert werden.")
                 current.sip.zip_to(archive)

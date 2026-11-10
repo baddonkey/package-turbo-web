@@ -21,6 +21,7 @@ from ph_backend.package_factory import create_package, suggested_name
 from ph_backend.processing import MAX_METADATA_BYTES, digest_file
 from ph_backend.sip import SipPackage
 
+from .database import Permission, Principal, ServiceDatabase
 from .models import PackageCreate, PackageSummary
 
 WEB_SOFTWARE_VERSION = f"Package Turbo Web {version('package-turbo')}"
@@ -154,16 +155,37 @@ class PackageStore:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.root = settings.data_dir.resolve()
+        self.database = ServiceDatabase(self.root / "service.sqlite3")
 
     def initialize(self) -> None:
         self.root.mkdir(parents=True, mode=0o700, exist_ok=True)
+        with FileLock(self.root / "catalog.lock", timeout=5):
+            self.database.initialize()
+            self._reconcile_publication()
+
+    def _reconcile_publication(self) -> None:
+        for package_id in self.database.pending_packages():
+            workspace = self.root / str(package_id)
+            if not workspace.exists():
+                self.database.abandon_package(package_id)
+                continue
+            with FileLock(workspace / "access.lock", timeout=5):
+                name = (workspace / "name").read_text(encoding="utf-8")
+                if not safe_part(name):
+                    raise WebError(409, "Pending SIP has an invalid name. Review it before restarting.")
+                pkg = WebSipPackage.open_folder(workspace / "sip" / name)
+                metadata_only = (workspace / "metadata-only").is_file()
+                pkg.read_only = metadata_only or (workspace / "read-only").is_file()
+                summary = OpenPackage(package_id, pkg, digest_file(pkg.metadata_path, "sha256"), metadata_only).summary()
+                self.database.update_summary(package_id, summary.model_dump(mode="json"))
+                self.database.publish_package(package_id)
 
     @contextmanager
     def staging(self):
         with tempfile.TemporaryDirectory(prefix=".staging-", dir=self.root) as path:
             yield Path(path)
 
-    def _publish(self, stage: Path, name: str, *, read_only=False, metadata_only=False) -> PackageSummary:
+    def _publish(self, stage: Path, name: str, owner: Principal, *, read_only=False, metadata_only=False) -> PackageSummary:
         pkg = WebSipPackage.open_folder(stage / "sip" / name, read_only=read_only or metadata_only)
         if read_only:
             (stage / "read-only").touch()
@@ -174,10 +196,14 @@ class PackageStore:
         (stage / "name").write_text(name, encoding="utf-8")
         package_id = uuid4()
         revision = digest_file(pkg.metadata_path, "sha256")
-        stage.rename(self.root / str(package_id))
-        return OpenPackage(package_id, pkg, revision, metadata_only).summary()
+        summary = OpenPackage(package_id, pkg, revision, metadata_only).summary()
+        with FileLock(self.root / "catalog.lock", timeout=5):
+            self.database.prepare_package(package_id, owner, summary.model_dump(mode="json"))
+            stage.rename(self.root / str(package_id))
+            self.database.publish_package(package_id)
+        return summary
 
-    def create(self, command: PackageCreate) -> PackageSummary:
+    def create(self, command: PackageCreate, owner: Principal) -> PackageSummary:
         name = command.name
         if name is None:
             suggested = suggested_name(command.delivering_office, command.reference or "")
@@ -195,9 +221,9 @@ class PackageStore:
                 stage / "sip", name, command.delivering_office, command.delivery_type,
                 creator=command.creator or "", system_name=command.system_name, version=command.release, csv_path=csv_path,
             )
-            return self._publish(stage, name)
+            return self._publish(stage, name, owner)
 
-    def import_zip(self, source: Path, fallback_name: str, read_only=False) -> PackageSummary:
+    def import_zip(self, source: Path, fallback_name: str, read_only: bool, owner: Principal) -> PackageSummary:
         with self.staging() as temporary:
             extracted = temporary / "extracted"
             _unpack(source, extracted, self.settings.max_expanded_bytes)
@@ -213,44 +239,45 @@ class PackageStore:
                 entries[0].rename(destination / name)
             else:
                 raise WebError(422, "ZIP must contain one SIP with header/metadata.xml.")
-            return self._publish(stage, name, read_only=read_only)
+            return self._publish(stage, name, owner, read_only=read_only)
 
-    def import_metadata(self, source: Path, name: str) -> PackageSummary:
+    def import_metadata(self, source: Path, name: str, owner: Principal) -> PackageSummary:
         name = name if safe_part(name) else "metadata.xml"
         with self.staging() as temporary:
             stage = temporary / "workspace"
             header = stage / "sip" / name / "header"
             header.mkdir(parents=True)
             shutil.copyfile(source, header / "metadata.xml")
-            return self._publish(stage, name, metadata_only=True)
+            return self._publish(stage, name, owner, metadata_only=True)
 
     @contextmanager
-    def open(self, package_id: UUID):
+    def access(self, package_id: UUID, principal: Principal, permission: Permission = "view"):
+        self.database.authorize(package_id, principal, permission)
         workspace = self.root / str(package_id)
         if not workspace.is_dir():
             raise WebError(404, "SIP workspace does not exist.")
         try:
             with FileLock(workspace / "access.lock", timeout=5):
-                name = (workspace / "name").read_text(encoding="utf-8")
-                package_dir = workspace / "sip" / name
-                recover_file_commit(package_dir, self.settings.operator, WEB_SOFTWARE_VERSION)
-                metadata_only = (workspace / "metadata-only").is_file()
-                pkg = WebSipPackage.open_folder(package_dir, read_only=metadata_only or (workspace / "read-only").is_file())
-                yield OpenPackage(package_id, pkg, digest_file(pkg.metadata_path, "sha256"), metadata_only)
+                self.database.authorize(package_id, principal, permission)
+                yield workspace
         except Timeout as exc:
             raise WebError(503, "SIP workspace is busy. Try again shortly.") from exc
 
-    def list(self, offset: int, limit: int) -> list[PackageSummary]:
-        ids = []
-        for path in self.root.iterdir():
-            try:
-                package_id = UUID(path.name)
-            except ValueError:
-                continue
-            if path.is_dir() and str(package_id) == path.name:
-                ids.append(package_id)
-        results = []
-        for package_id in sorted(ids)[offset:offset + limit]:
-            with self.open(package_id) as current:
-                results.append(current.summary())
-        return results
+    @contextmanager
+    def open(self, package_id: UUID, principal: Principal, permission: Permission = "view"):
+        with self.access(package_id, principal, permission) as workspace:
+            name = (workspace / "name").read_text(encoding="utf-8")
+            if not safe_part(name):
+                raise WebError(409, "SIP workspace has an invalid name.")
+            package_dir = workspace / "sip" / name
+            recover_file_commit(package_dir, "package-turbo recovery service", WEB_SOFTWARE_VERSION)
+            metadata_only = (workspace / "metadata-only").is_file()
+            pkg = WebSipPackage.open_folder(package_dir, read_only=metadata_only or (workspace / "read-only").is_file())
+            current = OpenPackage(package_id, pkg, digest_file(pkg.metadata_path, "sha256"), metadata_only)
+            self.database.update_summary(package_id, current.summary().model_dump(mode="json"))
+            yield current
+            updated = OpenPackage(package_id, pkg, digest_file(pkg.metadata_path, "sha256"), metadata_only)
+            self.database.update_summary(package_id, updated.summary().model_dump(mode="json"))
+
+    def list(self, principal: Principal, offset: int, limit: int) -> list[PackageSummary]:
+        return [PackageSummary.model_validate(summary) for summary in self.database.list_packages(principal, offset, limit)]
