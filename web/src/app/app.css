@@ -351,6 +351,9 @@
 .check-list th {
   background: var(--table-head);
 }
+.data-table tr.context-target td {
+  background: var(--tab-active);
+}
 
 .welcome {
   flex: 1;

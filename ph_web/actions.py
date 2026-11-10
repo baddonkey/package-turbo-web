@@ -30,10 +30,19 @@ def metadata_action(view: MetadataView, command: PackageAction):
         if localname(element) not in structure.CONTAINERS:
             raise WebError(422, "Dieser Objekttyp kann nicht verschoben oder gelöscht werden.")
     match action:
-        case "delete-note":
+        case "delete-note" | "edit-note":
             if not notes.is_note(element):
                 raise WebError(422, "Wählen Sie eine Notiz.")
-            notes.delete_note(pkg, element)
+            if action == "delete-note":
+                notes.delete_note(pkg, element)
+            else:
+                if not command.value.strip() or len(command.value) > 4000:
+                    raise WebError(422, "Eine Notiz braucht 1 bis 4000 Zeichen.")
+                notes.edit_note(pkg, element, command.value)
+        case "document-for-file":
+            if localname(element) != "datei" or len(targets) != 1:
+                raise WebError(422, "Wählen Sie eine Datei und genau ein zugehöriges Dossier.")
+            structure.document_for_file(pkg, targets[0], element)
         case "delete-object":
             structure.delete(pkg, [element])
         case "move-up" | "move-down":

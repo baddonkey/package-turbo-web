@@ -21,7 +21,7 @@ from ph_backend.package_factory import create_package, suggested_name
 from ph_backend.processing import MAX_METADATA_BYTES, digest_file
 from ph_backend.sip import SipPackage
 
-from .database import Permission, Principal, ServiceDatabase
+from .database import Permission, Principal, Role, ServiceDatabase
 from .models import PackageCreate, PackageSummary
 
 WEB_SOFTWARE_VERSION = f"Package Turbo Web {version('package-turbo')}"
@@ -76,6 +76,7 @@ class OpenPackage:
     sip: WebSipPackage
     revision: str
     metadata_only: bool = False
+    role: Role | None = None
 
     @property
     def etag(self) -> str:
@@ -84,7 +85,7 @@ class OpenPackage:
     def summary(self) -> PackageSummary:
         return PackageSummary(
             id=self.id, name=self.sip.name, schema_version=self.sip.root.get("schemaVersion", ""),
-            delivery_type=self.sip.delivery_type, read_only=self.sip.read_only, revision=self.revision, metadata_only=self.metadata_only,
+            delivery_type=self.sip.delivery_type, read_only=self.sip.read_only, revision=self.revision, metadata_only=self.metadata_only, role=self.role,
         )
 
 
@@ -201,7 +202,7 @@ class PackageStore:
             self.database.prepare_package(package_id, owner, summary.model_dump(mode="json"))
             stage.rename(self.root / str(package_id))
             self.database.publish_package(package_id)
-        return summary
+        return summary.model_copy(update={"role": "owner"})
 
     def create(self, command: PackageCreate, owner: Principal) -> PackageSummary:
         name = command.name
@@ -266,6 +267,7 @@ class PackageStore:
     @contextmanager
     def open(self, package_id: UUID, principal: Principal, permission: Permission = "view"):
         with self.access(package_id, principal, permission) as workspace:
+            role, _ = self.database.authorize(package_id, principal, permission)
             name = (workspace / "name").read_text(encoding="utf-8")
             if not safe_part(name):
                 raise WebError(409, "SIP workspace has an invalid name.")
@@ -273,10 +275,10 @@ class PackageStore:
             recover_file_commit(package_dir, "package-turbo recovery service", WEB_SOFTWARE_VERSION)
             metadata_only = (workspace / "metadata-only").is_file()
             pkg = WebSipPackage.open_folder(package_dir, read_only=metadata_only or (workspace / "read-only").is_file())
-            current = OpenPackage(package_id, pkg, digest_file(pkg.metadata_path, "sha256"), metadata_only)
+            current = OpenPackage(package_id, pkg, digest_file(pkg.metadata_path, "sha256"), metadata_only, role)
             self.database.update_summary(package_id, current.summary().model_dump(mode="json"))
             yield current
-            updated = OpenPackage(package_id, pkg, digest_file(pkg.metadata_path, "sha256"), metadata_only)
+            updated = OpenPackage(package_id, pkg, digest_file(pkg.metadata_path, "sha256"), metadata_only, role)
             self.database.update_summary(package_id, updated.summary().model_dump(mode="json"))
 
     def list(self, principal: Principal, offset: int, limit: int) -> list[PackageSummary]:

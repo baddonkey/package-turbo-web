@@ -119,6 +119,78 @@ def test_simultaneous_edits_to_same_revision_commit_only_once(client):
     assert client.get(delivery).json()["node"] == winner.json()["node"]
 
 
+def test_context_note_edit_and_bulk_creation_are_audited(client):
+    created = create(client)
+    base = created.headers["location"]
+    delivery = node_url(client, base, "ablieferung")
+    system_id = next(item["id"] for item in client.get(delivery + "/children").json()["items"]
+                     if item["kind"] == "ordnungssystem")
+    system = base + "/nodes/" + system_id
+    previous_count = len([item for item in client.get(system + "/children").json()["items"]
+                          if item["kind"] == "ordnungssystemposition"])
+    batch = client.post(system + "/children", headers={"If-Match": created.headers["etag"]},
+                        json={"kind": "ordnungssystemposition", "count": 3, "title": "Bulk"})
+    assert batch.status_code == 200, batch.text
+    positions = client.get(system + "/children").json()["items"]
+    assert len([item for item in positions if item["kind"] == "ordnungssystemposition"]) == previous_count + 3
+    parent = positions[0]["id"]
+    dossier = client.post(base + "/nodes/" + parent + "/children", headers={"If-Match": batch.headers["etag"]},
+                          json={"kind": "dossier", "title": "Notes"})
+    assert dossier.status_code == 200, dossier.text
+    dossier_id = next(item["id"] for item in client.get(base + "/nodes/" + parent + "/children").json()["items"]
+                      if item["kind"] == "dossier")
+    note = client.post(base + "/nodes/" + dossier_id + "/notes", headers={"If-Match": dossier.headers["etag"]},
+                       json={"text": "Original"})
+    assert note.status_code == 200, note.text
+    row = client.get(base + "/notes").json()["items"][0]
+    assert row["owner_id"] == dossier_id
+    edited = client.post(base + "/actions", headers={"If-Match": note.headers["etag"]},
+                         json={"action": "edit-note", "node_id": row["node_id"], "value": "Changed"})
+    assert edited.status_code == 200, edited.text
+    assert client.get(base + "/notes").json()["items"][0]["text"] == "Changed"
+    assert client.get(base + "/history").json()["items"][0]["type"] == "metadata commit"
+
+
+def test_context_folder_import_and_batch_replacement_are_atomic(client):
+    created = create(client, delivery_type="FILES")
+    base = created.headers["location"]
+    toc = node_url(client, base, "inhaltsverzeichnis")
+    folder_id = next(item["id"] for item in client.get(toc + "/children").json()["items"] if item["name"] == "content")
+    archive = BytesIO()
+    with ZipFile(archive, "w") as output:
+        output.writestr("records/one.txt", b"one")
+        output.writestr("records/two.txt", b"two")
+    imported = client.post(base + "/nodes/" + folder_id + "/content-import", content=archive.getvalue(),
+                           headers={"Content-Type": "application/zip", "If-Match": created.headers["etag"]})
+    assert imported.status_code == 200, imported.text
+    export = client.get(base + "/export")
+    with ZipFile(BytesIO(export.content)) as output:
+        assert output.read(created.json()["name"] + "/content/records/one.txt") == b"one"
+    replacement = BytesIO()
+    with ZipFile(replacement, "w") as output:
+        output.writestr("replacements/one.txt", b"changed")
+    replaced = client.post(toc + "/content-import?replace=true", content=replacement.getvalue(),
+                           headers={"Content-Type": "application/zip", "If-Match": '"' + imported.json()["revision"] + '"'})
+    assert replaced.status_code == 200, replaced.text
+    with ZipFile(BytesIO(client.get(base + "/export").content)) as output:
+        assert output.read(created.json()["name"] + "/content/records/one.txt") == b"changed"
+        assert output.read(created.json()["name"] + "/content/records/two.txt") == b"two"
+    unsafe = BytesIO()
+    with ZipFile(unsafe, "w") as output:
+        output.writestr("../escape.txt", b"bad")
+    rejected = client.post(base + "/nodes/" + folder_id + "/content-import", content=unsafe.getvalue(),
+                           headers={"Content-Type": "application/zip", "If-Match": '"' + replaced.json()["revision"] + '"'})
+    assert rejected.status_code == 422
+    assert client.get(base).json()["revision"] == replaced.json()["revision"]
+    collision = BytesIO()
+    with ZipFile(collision, "w") as output:
+        output.writestr("records/ONE.txt", b"must not overwrite")
+    refused = client.post(base + "/nodes/" + folder_id + "/content-import", content=collision.getvalue(),
+                          headers={"Content-Type": "application/zip", "If-Match": '"' + replaced.json()["revision"] + '"'})
+    assert refused.status_code == 409
+    assert client.get(base).json()["revision"] == replaced.json()["revision"]
+
+
 def test_all_package_routes_hide_private_packages_before_side_effects(client, web_settings, monkeypatch):
     created = create(client)
     package_id = created.json()["id"]
@@ -164,6 +236,7 @@ def test_owner_sharing_viewer_editor_and_revocation(client, web_settings):
         grant = {"user_id": str(user.id), "role": "viewer", "version": 1}
         assert client.put(base + "/sharing", json=grant).json()["version"] == 2
         assert other.get(base).status_code == 200
+        assert other.get(base).json()["role"] == "viewer"
         assert other.get(base + "/metadata.xml").status_code == 200
         assert other.post(base + "/validation").status_code == 200
         assert other.get(base + "/sharing").status_code == 403

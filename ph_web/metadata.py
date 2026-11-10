@@ -131,6 +131,11 @@ class MetadataView:
         definition = xsd_info.type_name(sip, element, self.schema)
         additional = self.schema.element(definition, "zusatzDaten") is not None
         properties = self.schema.element(definition, "eigenschaft") is not None and localname(element) == "datei"
+        owners = []
+        if localname(element) == "datei" and element.get("id"):
+            owners = list(dict.fromkeys(self.identifier(reference.getparent())
+                          for reference in sip.root.iter(sip.q("dateiRef"))
+                          if element.get("id") in (reference.text or "").split()))
         references = []
         for row in sip.reference_attributes(element):
             if row["attributes"]:
@@ -141,6 +146,8 @@ class MetadataView:
             node=self.node(element, identifier), parent_id=identifier.rpartition(".")[0] or None,
             fields=self.fields(element),
             references=[self.node(file, self.identifier(file)) for file in dict.fromkeys(sip.referenced_files(element))],
+            owner_ids=owners,
+            note_count=len(notes.notes_of(sip, element)),
             allowed_children=[] if sip.read_only else structure.allowed_children(sip, element),
             can_add_note=not sip.read_only and notes.can_have_notes(sip, element),
             can_upload_file=self.upload_folder(element) is not None,

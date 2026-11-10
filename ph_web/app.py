@@ -41,7 +41,7 @@ from .models import (
     NoteRow, NotesPage, PackageAction, PackageCreate,
     PackageSharing, PackageSummary, ReferenceEdit, SampleResult, SampleRow, SearchHit, SearchOption, SearchResult, SharingChange, Statistics, ValidationFix, ValidationIssue, ValidationResult,
 )
-from .storage import WEB_SOFTWARE_VERSION, OpenPackage, PackageStore, Settings, WebError, safe_part
+from .storage import WEB_SOFTWARE_VERSION, OpenPackage, PackageStore, Settings, WebError, _unpack, safe_part
 
 LOG = logging.getLogger(__name__)
 API_PREFIX = "/api/v1"
@@ -358,8 +358,8 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
     def add_child(request: Request, package_id: UUID, node_id: str, command: ChildCreate, response: Response,
                   if_match: Annotated[str, Header()]) -> NodeDetail:
         return mutation(request, package_id, node_id, if_match, response, "web structure creation",
-                        lambda view, element: structure.add_objects(view.sip, element, command.kind, title=command.title),
-                        {"kind": command.kind})
+                        lambda view, element: structure.add_objects(view.sip, element, command.kind, count=command.count, title=command.title),
+                        {"kind": command.kind, "count": command.count})
 
     @api.post("/packages/{package_id}/nodes/{node_id}/notes")
     def add_note(request: Request, package_id: UUID, node_id: str, command: NoteCreate, response: Response,
@@ -400,7 +400,7 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
                     after = xml_bytes(current.sip)
                     if before != after:
                         workspace(current, request).save(after, [event])
-            except (files.FileOperationError, structure.StructureError, ValueError, FileExistsError) as exc:
+            except (files.FileOperationError, structure.StructureError, notes.NoteError, ValueError, FileExistsError) as exc:
                 raise WebError(422, str(exc)) from exc
             return OpenPackage(current.id, current.sip, digest_bytes(current.sip.metadata_path.read_bytes())).summary()
 
@@ -475,6 +475,81 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
             result = await anyio.to_thread.run_sync(commit_attachment, request, package_id, node_id, if_match, source)
         response.headers["ETag"] = f'"{result.revision}"'
         return result
+
+    def import_content_archive(request: Request, package_id: UUID, node_id: str, if_match: str,
+                               source: Path, replace: bool, overwrite: bool) -> PackageSummary:
+        with opened(request, package_id, if_match) as current:
+            if current.sip.read_only:
+                raise WebError(409, "This SIP schema version is read-only.")
+            extracted = source.parent / "extracted"
+            extracted.mkdir()
+            _unpack(source, extracted, store.settings.max_expanded_bytes)
+            entries = list(extracted.iterdir())
+            if not entries:
+                raise WebError(422, "Wählen Sie mindestens eine Datei oder einen Ordner.")
+            if any(not files.is_valid_name(part) for path in extracted.rglob("*") for part in path.relative_to(extracted).parts):
+                raise WebError(422, "Importierte Namen müssen den SIP-Dateinamenregeln entsprechen.")
+            view = MetadataView(current)
+            element = view.element(node_id)
+            if not replace and current.sip.kind(element) == "ordner":
+                content_entry(view, element, folder_only=True, allow_root=True)
+                destination = current.sip.fs_path(element)
+                if destination is None or not destination.is_dir():
+                    raise WebError(422, "Der Zielordner fehlt oder liegt ausserhalb des Pakets.")
+
+                def check_destination(source_path: Path, target_dir: Path) -> None:
+                    existing = {path.name.casefold(): path for path in target_dir.iterdir()} if target_dir.is_dir() else {}
+                    target = existing.get(source_path.name.casefold())
+                    if target is not None and (target.name != source_path.name or target.is_dir() != source_path.is_dir()):
+                        raise WebError(409, "Importnamen kollidieren mit vorhandenen Dateien oder Ordnern.")
+                    if source_path.is_dir():
+                        for child in source_path.iterdir():
+                            check_destination(child, target_dir / source_path.name)
+
+                for entry in entries:
+                    check_destination(entry, destination)
+            elif not replace and (view.upload_folder(element) is None or any(entry.is_dir() for entry in entries)):
+                raise WebError(422, "Ordner können nur in Paketordner importiert werden.")
+            if replace and node_id not in ("0", view.identifier(current.sip.table_of_contents)):
+                raise WebError(422, "Wählen Sie das Paket für die Dateiersetzung.")
+            event = {"event_type": "web content batch replacement" if replace else "web content batch import",
+                     "detail": {"objectId": node_id, "overwrite": overwrite,
+                                "entries": [entry.name for entry in entries], "actor": actor(request)}}
+            transaction = FileWorkspace(workspace(current, request))
+
+            def apply(_staged):
+                if replace:
+                    source_dir = entries[0] if len(entries) == 1 and entries[0].is_dir() else extracted
+                    candidates = files.replacement_candidates(current.sip, source_dir)
+                    if not candidates:
+                        raise WebError(422, "Keine gleichnamigen Ersatzdateien gefunden.")
+                    files.replace_files(current.sip, candidates)
+                elif current.sip.kind(element) == "ordner":
+                    files.import_paths(current.sip, element, entries, merge=True, overwrite=overwrite)
+                else:
+                    for entry in entries:
+                        view.attach(element, entry)
+
+            try:
+                transaction.stage_operation(current.sip, apply, [event])
+                transaction.commit(current.sip, [event])
+            except (files.FileOperationError, structure.StructureError, ValueError, FileExistsError) as exc:
+                raise WebError(422, str(exc)) from exc
+            return OpenPackage(current.id, current.sip, digest_bytes(current.sip.metadata_path.read_bytes())).summary()
+
+    @api.post("/packages/{package_id}/nodes/{node_id}/content-import", openapi_extra={"requestBody": {
+        "required": True, "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}},
+    }})
+    async def import_content(request: Request, package_id: UUID, node_id: str,
+                             if_match: Annotated[str, Header()], replace: bool = False,
+                             overwrite: bool = False) -> PackageSummary:
+        if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/zip":
+            raise WebError(415, "Send content imports as application/zip.")
+        with store.staging() as temporary:
+            source = temporary / "content.zip"
+            await receive_upload(request, source)
+            return await anyio.to_thread.run_sync(import_content_archive, request, package_id,
+                                                 node_id, if_match, source, replace, overwrite)
 
     @api.get("/packages/{package_id}/search")
     def search_package(request: Request, package_id: UUID, q: Annotated[str, Query(min_length=1, max_length=160)],
@@ -608,13 +683,17 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
 
     @api.get("/packages/{package_id}/notes")
     def list_notes(request: Request, package_id: UUID, if_match: IfMatch = None,
-                   offset: Offset = 0, limit: Limit = 50) -> NotesPage:
+                   offset: Offset = 0, limit: Limit = 50, owner_id: str | None = None) -> NotesPage:
         with opened(request, package_id, if_match) as current:
             view = MetadataView(current)
             rows = notes.all_notes(current.sip)
+            if owner_id is not None:
+                view.element(owner_id)
+                rows = [row for row in rows if view.identifier(current.sip.element(row["key"])) == owner_id]
             return NotesPage(
                 items=[NoteRow(
                     node_id=view.identifier(current.sip.element(row["noteKey"])),
+                    owner_id=view.identifier(current.sip.element(row["key"])),
                     object_name=row["objectName"], object_kind=row["object"],
                     text=row["comment"], created=row["created"], author=row["author"],
                 ) for row in rows[offset:offset + limit]],

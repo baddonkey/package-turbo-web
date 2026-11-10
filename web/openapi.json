@@ -99,6 +99,13 @@
       "ChildCreate": {
         "additionalProperties": false,
         "properties": {
+          "count": {
+            "default": 1,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
           "kind": {
             "enum": [
               "ordnungssystemposition",
@@ -659,6 +666,18 @@
           "node": {
             "$ref": "#/components/schemas/Node"
           },
+          "note_count": {
+            "default": 0,
+            "title": "Note Count",
+            "type": "integer"
+          },
+          "owner_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Owner Ids",
+            "type": "array"
+          },
           "parent_id": {
             "anyOf": [
               {
@@ -774,6 +793,10 @@
             "title": "Object Name",
             "type": "string"
           },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
           "text": {
             "title": "Text",
             "type": "string"
@@ -781,6 +804,7 @@
         },
         "required": [
           "node_id",
+          "owner_id",
           "object_name",
           "object_kind",
           "text",
@@ -835,6 +859,8 @@
               "mass-edit",
               "mass-assign",
               "delete-note",
+              "edit-note",
+              "document-for-file",
               "new-folder",
               "rename-entry",
               "delete-entry"
@@ -1072,6 +1098,22 @@
           "revision": {
             "title": "Revision",
             "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "owner",
+                  "editor",
+                  "viewer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
           },
           "schema_version": {
             "title": "Schema Version",
@@ -3034,6 +3076,95 @@
         "summary": "Replace Content"
       }
     },
+    "/api/v1/packages/{package_id}/nodes/{node_id}/content-import": {
+      "post": {
+        "operationId": "import_content_api_v1_packages__package_id__nodes__node_id__content_import_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "package_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Package Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "replace",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Replace",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overwrite",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Overwrite",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": true,
+            "schema": {
+              "title": "If-Match",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/zip": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackageSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Content"
+      }
+    },
     "/api/v1/packages/{package_id}/nodes/{node_id}/field": {
       "patch": {
         "operationId": "update_field_api_v1_packages__package_id__nodes__node_id__field_patch",
@@ -3354,6 +3485,22 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
             }
           },
           {

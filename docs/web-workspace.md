@@ -151,6 +151,29 @@ role-aware sharing/progress UI, and supervised HTTPS deployment with capacity te
 
 ## Using the browser workspace
 
+Right-click navigator items, metadata section headings, result rows or table
+headings to open their context menus. Navigator items also have a menu button
+on hover/focus (always visible on touch devices). Shift+F10 or the Context Menu
+key opens the menu for a focused item; arrow keys navigate and Escape closes it.
+Menus stay within the viewport and close on outside clicks, scrolling or a new
+operation. Browser-native text menus remain available in inputs and textareas.
+
+The menus follow the desktop application's classification, dossier, package,
+note, validation and metadata-section menus. Table headings offer checkable
+column visibility and table copying; search, sample, changes and history rows
+also expose navigation/copying and their relevant commands. Read-only packages
+and viewers cannot use mutation commands; pending metadata edits block immediate
+package mutations. The server remains authoritative for every command.
+
+Web adaptations: opening a content file downloads it, cut/paste moves one object
+within the current package revision, and file/folder selections are sent as bounded
+ZIP imports rather than exposing server filesystem paths. Bulk object creation is
+limited to 100 children per request. Import folders merge; existing files are skipped
+unless replacing equal names is explicitly selected and confirmed. Case/type name
+collisions are rejected. Batch replacement uses same-name files in the selected
+folder, as in the desktop implementation, and retains the existing audited staged
+commit/rollback workflow. The server's upload and expansion limits still apply.
+
 The workspace uses German labels and a four-pane layout.
 The classification tree stays visible above the Dossiers and Paketinhalt tabs.
 The right side shows metadata above validation, notes, search, and history.

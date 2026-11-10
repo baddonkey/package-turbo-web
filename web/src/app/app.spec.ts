@@ -1,6 +1,16 @@
 import { TestBed } from '@angular/core/testing';
 import { App } from './app';
-import { Field, FieldEdit, MetadataEdit, NodeDetail, Sip, SipApi, SipNode } from './api';
+import { ContextMenu, ContextMenuState } from './context-menu';
+import {
+  Field,
+  FieldEdit,
+  MetadataEdit,
+  NodeDetail,
+  PackageAction,
+  Sip,
+  SipApi,
+  SipNode,
+} from './api';
 
 const sip: Sip = {
   id: 'f044321a-b150-4a3d-9b40-af2f156ea558',
@@ -51,6 +61,42 @@ const dossier = {
 };
 const content = entity('0.0.0', 'ordner', 'content');
 
+describe('Shared item context menu', () => {
+  it('focuses enabled commands, supports keyboard navigation and returns focus on Escape', async () => {
+    await TestBed.configureTestingModule({ imports: [ContextMenu] }).compileComponents();
+    const fixture = TestBed.createComponent(ContextMenu);
+    const invoker = document.createElement('button');
+    document.body.append(invoker);
+    const menu: ContextMenuState = {
+      x: 30,
+      y: 40,
+      label: 'Dossier',
+      invoker,
+      commands: [
+        { label: 'Disabled', disabled: true, run: () => {} },
+        { label: 'Show', run: () => {} },
+        { label: 'Copy', run: () => {} },
+      ],
+    };
+    fixture.componentRef.setInput('state', menu);
+    await fixture.whenStable();
+    const buttons = fixture.nativeElement.querySelectorAll(
+      'button',
+    ) as NodeListOf<HTMLButtonElement>;
+    expect(document.activeElement).toBe(buttons[1]);
+    buttons[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(buttons[2]);
+    let closed = false;
+    fixture.componentInstance.closed.subscribe(() => {
+      closed = true;
+    });
+    buttons[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(closed).toBe(true);
+    expect(document.activeElement).toBe(invoker);
+    invoker.remove();
+  });
+});
+
 const children: Record<string, SipNode[]> = {
   '0': [toc, delivery],
   [toc.id]: [content],
@@ -76,7 +122,8 @@ function detail(id: string): NodeDetail {
     parent_id: id === '0' ? null : id.slice(0, id.lastIndexOf('.')),
     fields: fields[id] ?? [],
     references: [],
-    allowed_children: [],
+    allowed_children:
+      id === system.id ? ['ordnungssystemposition'] : id === position.id ? ['dossier'] : [],
     can_upload_file: false,
     can_add_note: id === dossier.id,
     file_name: null,
@@ -86,9 +133,11 @@ function detail(id: string): NodeDetail {
 
 describe('Package Turbo desktop-style workspace', () => {
   const edits: { id: string; command: FieldEdit }[] = [];
+  const actions: PackageAction[] = [];
 
   async function setup() {
     edits.length = 0;
+    actions.length = 0;
     await TestBed.configureTestingModule({
       imports: [App],
       providers: [
@@ -107,6 +156,12 @@ describe('Package Turbo desktop-style workspace', () => {
             exportUrl: () => '/api/v1/packages/test/export',
             metadataUrl: () => '/api/v1/packages/test/metadata.xml',
             reportUrl: () => '/api/v1/packages/test/reports/dossiers',
+            contentUrl: () => '/api/v1/packages/test/nodes/file/content',
+            notes: async () => ({ items: [], next_offset: null }),
+            packageAction: async (_sip: Sip, action: PackageAction) => {
+              actions.push(action);
+              return { ...sip, revision: 'second' };
+            },
             previewMetadata: async (_sip: Sip, item: MetadataEdit) => ({
               changed: true,
               field: field(item.edit.tag, 'Aktenbildner Name', item.edit.values[0]),
@@ -152,6 +207,150 @@ describe('Package Turbo desktop-style workspace', () => {
     });
     return { fixture, root, dialog };
   }
+
+  it('right-clicks an unselected classification item and executes against that item', async () => {
+    const { fixture, root } = await setup();
+    fixture.componentInstance.select(sip.id);
+    await fixture.whenStable();
+    fixture.componentInstance.navigate(dossier.id);
+    await fixture.whenStable();
+    const button = [
+      ...root.querySelectorAll<HTMLButtonElement>('.classification button.node'),
+    ].find((item) => item.title === position.name)!;
+    const click = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 140,
+      clientY: 180,
+    });
+    button.dispatchEvent(click);
+    await fixture.whenStable();
+    expect(click.defaultPrevented).toBe(true);
+    expect(fixture.componentInstance.node()?.node.id).toBe(position.id);
+    const menu = root.querySelector('[role="menu"]')!;
+    expect(menu.getAttribute('aria-label')).toBe(position.name);
+    const move = [...menu.querySelectorAll<HTMLButtonElement>('button')].find((item) =>
+      item.textContent?.includes('Nach unten verschieben'),
+    )!;
+    move.click();
+    await fixture.whenStable();
+    expect(actions[0].node_id).toBe(position.id);
+    expect(actions[0].action).toBe('move-down');
+    expect(root.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('opens dossier menus by keyboard and keeps their commands distinct', async () => {
+    const { fixture, root } = await setup();
+    fixture.componentInstance.select(sip.id);
+    await fixture.whenStable();
+    const button = root.querySelector<HTMLButtonElement>('.lower-navigator button.node')!;
+    button.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }),
+    );
+    await fixture.whenStable();
+    const menu = root.querySelector('[role="menu"]')!;
+    expect(menu.textContent).toContain('Neue Notiz');
+    expect(menu.textContent).toContain('Im Ordnungssystem anzeigen');
+    expect(menu.textContent).not.toContain('Objekt löschen');
+  });
+
+  it('offers bulk creation and disables writes for viewer packages', async () => {
+    const { fixture, root, dialog } = await setup();
+    fixture.componentInstance.select(sip.id);
+    await fixture.whenStable();
+    let button = [...root.querySelectorAll<HTMLButtonElement>('.classification button.node')].find(
+      (item) => item.title === position.name,
+    )!;
+    button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await fixture.whenStable();
+    const bulk = [...root.querySelectorAll<HTMLButtonElement>('[role="menu"] button')].find(
+      (item) => item.textContent?.includes('Mehrere neue Dossier'),
+    )!;
+    bulk.click();
+    await fixture.whenStable();
+    expect(dialog.open).toBe(true);
+    expect(fixture.componentInstance.childKind).toBe('dossier');
+    expect(fixture.componentInstance.childCount).toBe(2);
+    fixture.componentInstance.closeDialog();
+    fixture.componentInstance.sip.set({ ...sip, role: 'viewer' });
+    await fixture.whenStable();
+    button = [...root.querySelectorAll<HTMLButtonElement>('.classification button.node')].find(
+      (item) => item.title === position.name,
+    )!;
+    button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await fixture.whenStable();
+    const commands = [...root.querySelectorAll<HTMLButtonElement>('[role="menu"] button')];
+    expect(
+      commands.find((item) => item.textContent?.includes('Mehrere neue Dossier'))?.disabled,
+    ).toBe(true);
+    expect(
+      commands.some((item) => !item.disabled && item.textContent?.includes('Objekt löschen')),
+    ).toBe(false);
+  });
+
+  it('opens note editing for the clicked note and keeps native text menus untouched', async () => {
+    const { fixture, root, dialog } = await setup();
+    fixture.componentInstance.select(sip.id);
+    await fixture.whenStable();
+    fixture.componentInstance.notes.set({
+      items: [
+        {
+          node_id: 'note-id',
+          owner_id: dossier.id,
+          object_name: dossier.name,
+          object_kind: 'Dossier',
+          text: 'Original',
+          created: '',
+          author: 'Archivist',
+        },
+      ],
+      next_offset: null,
+    });
+    fixture.componentInstance.setTool('notes');
+    await fixture.whenStable();
+    root
+      .querySelector('.results tbody td')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await fixture.whenStable();
+    [...root.querySelectorAll<HTMLButtonElement>('[role="menu"] button')]
+      .find((item) => item.textContent?.includes('Notiz bearbeiten'))!
+      .click();
+    await fixture.whenStable();
+    expect(dialog.open).toBe(true);
+    const textarea = dialog.querySelector<HTMLTextAreaElement>('textarea')!;
+    expect(textarea.value).toBe('Original');
+    const native = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    textarea.dispatchEvent(native);
+    expect(native.defaultPrevented).toBe(false);
+    textarea.value = 'Edited';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    dialog
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await fixture.whenStable();
+    expect(actions[0]).toMatchObject({ action: 'edit-note', node_id: 'note-id', value: 'Edited' });
+  });
+
+  it('shows checkable column menus, hides a column and can restore it', async () => {
+    const { fixture, root } = await setup();
+    const first = root.querySelector<HTMLTableCellElement>('.results thead th')!;
+    first.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await fixture.whenStable();
+    const toggle = root.querySelector<HTMLButtonElement>('[role="menuitemcheckbox"]')!;
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    toggle.click();
+    await fixture.whenStable();
+    expect(first.hidden).toBe(true);
+    root
+      .querySelectorAll('.results thead th')[1]
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await fixture.whenStable();
+    [...root.querySelectorAll<HTMLButtonElement>('[role="menu"] button')]
+      .find((item) => item.textContent?.includes('Alle Spalten anzeigen'))!
+      .click();
+    await fixture.whenStable();
+    expect(first.hidden).toBe(false);
+  });
 
   it('exposes the empty changes pane from both the tab bar and the View menu', async () => {
     const { fixture, root } = await setup();

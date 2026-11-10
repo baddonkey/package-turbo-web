@@ -48,6 +48,29 @@ li {
 .tree-name {
   height: 100%;
 }
+.context-trigger {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+}
+.context-trigger img {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+li:hover .context-trigger,
+li:focus-within .context-trigger {
+  opacity: 1;
+}
+@media (hover: none) {
+  .context-trigger {
+    opacity: 1;
+  }
+}
 .node,
 .disclosure {
   border: 0;

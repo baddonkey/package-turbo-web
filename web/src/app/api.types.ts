@@ -390,6 +390,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/packages/{package_id}/nodes/{node_id}/content-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Content */
+        post: operations["import_content_api_v1_packages__package_id__nodes__node_id__content_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/packages/{package_id}/nodes/{node_id}/field": {
         parameters: {
             query?: never;
@@ -689,6 +706,11 @@ export interface components {
         /** ChildCreate */
         ChildCreate: {
             /**
+             * Count
+             * @default 1
+             */
+            count?: number;
+            /**
              * Kind
              * @enum {string}
              */
@@ -855,6 +877,13 @@ export interface components {
             /** File Properties */
             file_properties?: components["schemas"]["NameValue"][] | null;
             node: components["schemas"]["Node"];
+            /**
+             * Note Count
+             * @default 0
+             */
+            note_count?: number;
+            /** Owner Ids */
+            owner_ids?: string[];
             /** Parent Id */
             parent_id: string | null;
             /** Reference Attributes */
@@ -890,6 +919,8 @@ export interface components {
             object_kind: string;
             /** Object Name */
             object_name: string;
+            /** Owner Id */
+            owner_id: string;
             /** Text */
             text: string;
         };
@@ -906,7 +937,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "delete-object" | "move-up" | "move-down" | "move-object" | "assign-files" | "remove-assignment" | "create-documents" | "renumber" | "accumulate-timespans" | "mass-edit" | "mass-assign" | "delete-note" | "new-folder" | "rename-entry" | "delete-entry";
+            action: "delete-object" | "move-up" | "move-down" | "move-object" | "assign-files" | "remove-assignment" | "create-documents" | "renumber" | "accumulate-timespans" | "mass-edit" | "mass-assign" | "delete-note" | "edit-note" | "document-for-file" | "new-folder" | "rename-entry" | "delete-entry";
             /**
              * Create Documents
              * @default false
@@ -1017,6 +1048,8 @@ export interface components {
             read_only: boolean;
             /** Revision */
             revision: string;
+            /** Role */
+            role?: ("owner" | "editor" | "viewer") | null;
             /** Schema Version */
             schema_version: string;
         };
@@ -2080,6 +2113,47 @@ export interface operations {
             };
         };
     };
+    import_content_api_v1_packages__package_id__nodes__node_id__content_import_post: {
+        parameters: {
+            query?: {
+                replace?: boolean;
+                overwrite?: boolean;
+            };
+            header: {
+                "if-match": string;
+            };
+            path: {
+                package_id: string;
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/zip": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_field_api_v1_packages__package_id__nodes__node_id__field_patch: {
         parameters: {
             query?: never;
@@ -2238,6 +2312,7 @@ export interface operations {
             query?: {
                 offset?: number;
                 limit?: number;
+                owner_id?: string | null;
             };
             header?: {
                 /** @description Exact quoted ETag of the metadata revision. */

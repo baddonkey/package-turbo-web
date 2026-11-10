@@ -34,6 +34,7 @@ class PackageSummary(BaseModel):
     read_only: bool
     revision: str
     metadata_only: bool = False
+    role: Literal["owner", "editor", "viewer"] | None = None
 
 
 class SharingGrant(BaseModel):
@@ -121,6 +122,8 @@ class NodeDetail(BaseModel):
     parent_id: str | None
     fields: list[MetadataField]
     references: list[Node]
+    owner_ids: list[str] = Field(default_factory=list)
+    note_count: int = 0
     allowed_children: list[ObjectKind]
     can_add_note: bool
     can_upload_file: bool
@@ -158,6 +161,7 @@ class MetadataCommit(BaseModel):
 
 class ChildCreate(Input):
     kind: ObjectKind
+    count: Annotated[int, Field(ge=1, le=100)] = 1
     title: ShortText | None = None
 
 
@@ -211,6 +215,7 @@ class ValidationResult(BaseModel):
 
 class NoteRow(BaseModel):
     node_id: str
+    owner_id: str
     object_name: str
     object_kind: str
     text: str
@@ -280,7 +285,7 @@ class SampleResult(BaseModel):
 class PackageAction(Input):
     action: Literal["delete-object", "move-up", "move-down", "move-object", "assign-files",
                     "remove-assignment", "create-documents", "renumber", "accumulate-timespans",
-                    "mass-edit", "mass-assign", "delete-note", "new-folder", "rename-entry", "delete-entry"]
+                    "mass-edit", "mass-assign", "delete-note", "edit-note", "document-for-file", "new-folder", "rename-entry", "delete-entry"]
     node_id: str
     target_ids: Annotated[list[str], Field(max_length=100)] = Field(default_factory=list)
     name: ShortText | None = None

@@ -181,12 +181,13 @@ class ServiceDatabase:
 
     def list_packages(self, principal: Principal, offset: int, limit: int) -> list[dict]:
         with self.connection() as connection:
-            rows = connection.execute("""SELECT p.summary FROM packages p
+            rows = connection.execute("""SELECT p.summary, p.owner_id, g.role FROM packages p
                 JOIN users u ON u.id=? AND u.enabled=1
                 LEFT JOIN grants g ON g.package_id=p.id AND g.user_id=u.id
                 WHERE p.state='ready' AND (p.owner_id=u.id OR g.user_id IS NOT NULL)
                 ORDER BY p.id LIMIT ? OFFSET ?""", (str(principal.id), limit, offset))
-            return [json.loads(row[0]) for row in rows]
+            return [{**json.loads(row["summary"]),
+                     "role": "owner" if row["owner_id"] == str(principal.id) else row["role"]} for row in rows]
 
     def update_summary(self, package_id: UUID, summary: dict) -> None:
         with self.connection(write=True) as connection:

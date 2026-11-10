@@ -19,6 +19,10 @@ Binary lxml wheels may include native libraries; consult the selected wheel's no
 
 ## Tools and Visual Assets
 
+The browser uses [fflate](https://github.com/101arrowz/fflate) (MIT) to package
+selected files and folders for bounded server-side content imports. Its resolved
+version is recorded in `web/package-lock.json`.
+
 | Component | Use | License | Source and license information |
 | --- | --- | --- | --- |
 | DROID | Optional external file-format identification executable; not bundled by this repository | BSD-3-Clause | [Official repository license](https://github.com/digital-preservation/droid/blob/main/LICENSE) |

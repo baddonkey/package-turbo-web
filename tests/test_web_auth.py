@@ -179,7 +179,7 @@ def test_service_catalog_identity_ownership_and_sharing_survive_reopen(tmp_path)
         database.authorize(package_id, owner)
     assert failure.value.status == 404
     database.publish_package(package_id)
-    assert database.list_packages(owner, 0, 50) == [summary]
+    assert database.list_packages(owner, 0, 50) == [{**summary, "role": "owner"}]
     assert database.list_packages(stranger, 0, 50) == []
     with pytest.raises(AccessDenied) as failure:
         database.authorize(package_id, stranger)
@@ -265,7 +265,7 @@ def test_legacy_workspace_migration_is_explicit_and_preserves_package_bytes(sett
         assert (workspace / name).read_bytes() == data
     database = ServiceDatabase(settings.data_dir / "service.sqlite3")
     owner = database.register_user(issuer, "verified-subject", "Renamed")
-    assert database.list_packages(owner, 0, 50) == applied
+    assert database.list_packages(owner, 0, 50) == [{**summary, "role": "owner"} for summary in applied]
     with pytest.raises(ValueError, match="already has a catalog entry"):
         migrate(settings.data_dir, [package_id], issuer, "other-subject", "Other", apply=True)
 

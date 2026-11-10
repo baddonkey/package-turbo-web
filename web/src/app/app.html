@@ -219,6 +219,7 @@
     <div class="scroll">
       <app-navigator-tree
         label="Ordnungssystem"
+        (itemContext)="openNodeContext($event, 'classification')"
         [rows]="classificationRows()"
         [selected]="node()?.node?.id"
         [disabled]="!!busy()"
@@ -267,6 +268,7 @@
       @if (bottomTree() === 'dossiers') {
         <app-navigator-tree
           label="Dossiers"
+          (itemContext)="openNodeContext($event, 'dossiers')"
           [columns]="true"
           [rows]="dossierRows()"
           [selected]="node()?.node?.id"
@@ -278,6 +280,7 @@
       } @else {
         <app-navigator-tree
           label="Paketinhalt"
+          (itemContext)="openNodeContext($event, 'files')"
           [rows]="fileRows()"
           [selected]="node()?.node?.id"
           [disabled]="!!busy()"
@@ -786,6 +789,13 @@
         </div>
       }
       @case ('notes') {
+        @if (notesOwner()) {
+          <div class="table-toolbar">
+            <button type="button" [disabled]="!!busy()" (click)="showNotes(null)">
+              Alle Notizen
+            </button>
+          </div>
+        }
         @if (node()?.can_add_note) {
           <form class="table-toolbar search-form" (ngSubmit)="addNote()">
             <input
@@ -982,9 +992,18 @@
   }
 </footer>
 
+<app-context-menu [state]="contextMenu()" (closed)="closeContext()" />
+
 <ng-template #fields let-detail>
   <section class="record">
-    <h3>{{ detail.node.label }} – {{ detail.node.name }}</h3>
+    <h3
+      tabindex="0"
+      aria-haspopup="menu"
+      (contextmenu)="openNodeContext({ event: $event, nodeId: detail.node.id }, 'section')"
+      (keydown)="sectionContextKey($event, detail.node.id)"
+    >
+      {{ detail.node.label }} – {{ detail.node.name }}
+    </h3>
     <div class="field-group">
       @for (entry of fieldsFor(detail); track entry.key) {
         @if (entry.field.tag !== 'zusatzDaten' && (entry.field.primary || !hasPrimary(detail))) {
@@ -1167,6 +1186,60 @@
       <div class="dialog-actions">
         <button type="button" (click)="closeDialog()">Schliessen</button>
       </div>
+    }
+    @case ('note-edit') {
+      <h2 id="dialog-title">Notiz bearbeiten</h2>
+      <form (ngSubmit)="saveNote()">
+        <label
+          >Notiz<textarea
+            name="noteEdit"
+            [(ngModel)]="noteEditText"
+            maxlength="4000"
+            required
+          ></textarea>
+        </label>
+        <div class="dialog-actions">
+          <button type="button" (click)="closeDialog()">Abbrechen</button>
+          <button type="submit" [disabled]="!!busy() || hasChanges() || !noteEditText.trim()">
+            Speichern
+          </button>
+        </div>
+      </form>
+    }
+    @case ('content') {
+      <h2 id="dialog-title">
+        {{ contentMode.startsWith('replace') ? 'Dateien ersetzen' : 'Inhalt importieren' }} –
+        {{ node()?.node?.name }}
+      </h2>
+      <form (ngSubmit)="submitContent()">
+        <label
+          >{{ contentMode === 'folder' || contentMode === 'replace-many' ? 'Ordner' : 'Dateien' }}
+          <input
+            type="file"
+            [multiple]="contentMode !== 'replace'"
+            [attr.webkitdirectory]="
+              contentMode === 'folder' || contentMode === 'replace-many' ? '' : null
+            "
+            (change)="
+              contentFiles = $any($event.target).files
+                ? [].slice.call($any($event.target).files)
+                : []
+            "
+          />
+        </label>
+        @if (!contentMode.startsWith('replace')) {
+          <label
+            ><input type="checkbox" name="overwrite" [(ngModel)]="contentOverwrite" /> Gleichnamige
+            Dateien ersetzen</label
+          >
+        }
+        <div class="dialog-actions">
+          <button type="button" (click)="closeDialog()">Abbrechen</button>
+          <button type="submit" [disabled]="!!busy() || hasChanges() || !contentFiles.length">
+            {{ contentMode.startsWith('replace') ? 'Ersetzen' : 'Importieren' }}
+          </button>
+        </div>
+      </form>
     }
     @case ('cleanup') {
       <h2 id="dialog-title">Sicherungskopien bereinigen</h2>
@@ -1357,6 +1430,15 @@
     @case ('child') {
       <h2 id="dialog-title">Objekt hinzufügen</h2>
       <form (ngSubmit)="addChild()">
+        <label
+          >Anzahl<input
+            name="childCount"
+            type="number"
+            min="1"
+            max="100"
+            [(ngModel)]="childCount"
+            required
+        /></label>
         <label
           >Objekttyp<select name="kind" [(ngModel)]="childKind">
             <option value="">Typ auswählen</option>

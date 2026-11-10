@@ -174,6 +174,15 @@ export class SipApi {
     );
   }
 
+  importContent(sip: Sip, id: string, archive: Blob, replace = false, overwrite = false) {
+    return firstValueFrom(
+      this.http.post<Sip>(this.nodeUrl(sip, id) + '/content-import', archive, {
+        headers: this.match(sip).headers.set('Content-Type', 'application/zip'),
+        params: { replace, overwrite },
+      }),
+    );
+  }
+
   search(sip: Sip, q: string) {
     return firstValueFrom(
       this.http.get<SearchResult>(this.packageUrl(sip.id) + '/search', {
@@ -244,11 +253,11 @@ export class SipApi {
     );
   }
 
-  notes(sip: Sip, offset: number) {
+  notes(sip: Sip, offset: number, ownerId?: string | null) {
     return firstValueFrom(
       this.http.get<NotesPage>(this.packageUrl(sip.id) + '/notes', {
         ...this.match(sip),
-        params: { offset },
+        params: { offset, ...(ownerId ? { owner_id: ownerId } : {}) },
       }),
     );
   }

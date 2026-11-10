@@ -5,6 +5,7 @@ import {
   Injector,
   HostListener,
   afterNextRender,
+  afterEveryRender,
   computed,
   inject,
   OnInit,
@@ -13,6 +14,7 @@ import {
   viewChildren,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { zip, type Zippable } from 'fflate';
 import {
   ChildCreate,
   CleanupPreview,
@@ -39,6 +41,7 @@ import {
 } from './api';
 import { MetadataField } from './metadata-field';
 import { NavigatorTree, TreeRow } from './navigator-tree';
+import { ContextCommand, ContextMenu, ContextMenuState, ItemContext } from './context-menu';
 
 type Tool = 'validation' | 'notes' | 'sample' | 'search' | 'changes' | 'history';
 interface PendingEdit {
@@ -50,7 +53,16 @@ interface PendingEdit {
 }
 
 type Editor = 'overview' | 'statistics' | 'validation' | 'object';
-type Dialog = 'open' | 'create' | 'child' | 'actions' | 'properties' | 'cleanup' | 'event';
+type Dialog =
+  | 'open'
+  | 'create'
+  | 'child'
+  | 'actions'
+  | 'properties'
+  | 'cleanup'
+  | 'event'
+  | 'note-edit'
+  | 'content';
 type Action = PackageAction['action'];
 const DOSSIERS = 'dossiers';
 const recordKinds = new Set([
@@ -74,16 +86,29 @@ const kindNames: Record<string, string> = {
   datei: 'Datei',
   ordner: 'Ordner',
 };
+const creationNames: Record<string, [string, string]> = {
+  ordnungssystemposition: ['Neue Ordnungssystemposition', 'Mehrere neue Ordnungssystempositionen…'],
+  dossier: ['Neues Dossier', 'Mehrere neue Dossiers…'],
+  dokument: ['Neues Dokument', 'Mehrere neue Dokumente…'],
+  mappe: ['Neue Mappe', 'Mehrere neue Mappen…'],
+  vorgang: ['Neuer Vorgang', 'Mehrere neue Vorgänge…'],
+  aktivitaet: ['Neue Aktivität', 'Mehrere neue Aktivitäten…'],
+};
 
 @Component({
   selector: 'app-workspace',
-  imports: [DatePipe, FormsModule, MetadataField, NavigatorTree, NgTemplateOutlet],
+  imports: [DatePipe, FormsModule, MetadataField, NavigatorTree, NgTemplateOutlet, ContextMenu],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
 export class App implements OnInit {
   readonly api = inject(SipApi);
   private readonly injector = inject(Injector);
+  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  readonly contextMenu = signal<ContextMenuState | null>(null);
+  private readonly hiddenColumns = signal(new Map<string, Set<number>>());
+  private contextRow: HTMLTableRowElement | null = null;
+  readonly cutNode = signal<{ sipId: string; revision: string; node: SipNode } | null>(null);
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   private readonly editors = viewChildren(MetadataField);
   readonly editing = computed(() => this.editors().some((editor) => editor.editing()));
@@ -93,6 +118,9 @@ export class App implements OnInit {
   readonly packages = signal<Sip[]>([]);
   readonly hasMore = signal(false);
   readonly sip = signal<Sip | null>(null);
+  readonly writable = computed(
+    () => !!this.sip() && !this.sip()?.read_only && this.sip()?.role !== 'viewer',
+  );
   readonly node = signal<NodeDetail | null>(null);
   readonly delivery = signal<NodeDetail | null>(null);
   readonly provenance = signal<NodeDetail | null>(null);
@@ -129,6 +157,7 @@ export class App implements OnInit {
   readonly stats = signal<Statistics | null>(null);
   readonly audit = signal<History | null>(null);
   readonly notes = signal<NotesPage | null>(null);
+  readonly notesOwner = signal<string | null>(null);
   readonly severity = signal('');
   readonly checkId = signal('');
   private readonly generation = signal(0);
@@ -139,7 +168,7 @@ export class App implements OnInit {
 
   readonly availableActions = computed(() => {
     const detail = this.node();
-    if (!detail || this.sip()?.read_only) return [];
+    if (!detail || !this.writable()) return [];
     const kind = detail.node.kind;
     const choices: { id: Action; label: string }[] = [];
     if (
@@ -315,9 +344,591 @@ export class App implements OnInit {
   searchKind = 'dossier';
   criteria = [{ tag: '', value: '', empty: false }];
   childKind: ChildCreate['kind'] | '' = '';
+  childCount = 1;
   childTitle = '';
   noteText = '';
   attachment: File | null = null;
+  noteTarget: NotesPage['items'][number] | null = null;
+  noteEditText = '';
+  contentMode: 'files' | 'folder' | 'replace' | 'replace-many' = 'files';
+  contentFiles: File[] = [];
+  contentOverwrite = false;
+
+  constructor() {
+    afterEveryRender(() => {
+      for (const table of this.element.nativeElement.querySelectorAll<HTMLTableElement>('table')) {
+        const hidden = this.hiddenColumns().get(this.tableKey(table));
+        for (const row of table.rows) {
+          for (const cell of row.cells) cell.hidden = hidden?.has(cell.cellIndex) ?? false;
+          if (row.parentElement?.tagName === 'THEAD') {
+            for (const cell of row.cells) {
+              cell.tabIndex = 0;
+              cell.setAttribute('aria-haspopup', 'menu');
+            }
+          } else {
+            row.tabIndex = 0;
+            row.setAttribute('aria-haspopup', 'menu');
+            row.classList.toggle('context-target', row === this.contextRow);
+          }
+        }
+      }
+    });
+  }
+
+  closeContext() {
+    this.contextMenu.set(null);
+    this.contextRow = null;
+  }
+
+  private showContext(
+    event: MouseEvent | KeyboardEvent,
+    label: string,
+    commands: ContextCommand[],
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    const target = event.target as HTMLElement;
+    const invoker = target.closest<HTMLElement>('button, a, th, tr, h3') ?? target;
+    const bounds = invoker.getBoundingClientRect();
+    this.contextMenu.set({
+      label,
+      commands,
+      invoker,
+      x:
+        event instanceof MouseEvent && (event.clientX || event.clientY)
+          ? event.clientX
+          : bounds.left,
+      y:
+        event instanceof MouseEvent && (event.clientX || event.clientY)
+          ? event.clientY
+          : bounds.bottom,
+    });
+  }
+
+  async openNodeContext(
+    context: ItemContext,
+    source: 'classification' | 'dossiers' | 'files' | 'section',
+  ) {
+    const { event, nodeId, parentId } = context;
+    event.preventDefault();
+    event.stopPropagation();
+    const sip = this.sip();
+    if (!sip || this.busy() || this.editing()) return;
+    const previous = this.node();
+    await this.run('Metadaten werden geladen', () => this.openNode(sip, nodeId));
+    const detail = this.node();
+    if (this.error() || !detail || detail.node.id !== nodeId || this.sip()?.id !== sip.id) return;
+    const blocked = this.hasChanges() || !this.writable();
+    const ownerId = detail.owner_ids?.find((id) => id === parentId) ?? detail.owner_ids?.[0];
+    const commands: ContextCommand[] = [
+      { label: 'Im Editor anzeigen', run: () => this.navigate(nodeId) },
+      {
+        label: 'Im Ordnungssystem anzeigen',
+        disabled:
+          detail.node.kind === 'datei'
+            ? !ownerId
+            : !recordKinds.has(detail.node.kind) &&
+              !['ordnungssystem', 'ordnungssystemposition'].includes(detail.node.kind),
+        run: () => {
+          this.bottomTree.set('dossiers');
+          this.navigate(ownerId ?? nodeId);
+        },
+      },
+    ];
+    if (detail.file_name)
+      commands.push({
+        label: 'Datei zeigen / herunterladen',
+        icon: 'download',
+        run: () => this.download(this.api.contentUrl(sip, nodeId)),
+      });
+    if (source !== 'dossiers' && source !== 'section') {
+      for (const kind of detail.allowed_children)
+        commands.push(
+          {
+            label: creationNames[kind]?.[0] ?? 'Neu: ' + this.nameFor(kind),
+            disabled: blocked,
+            run: () => {
+              this.showDialog('child');
+              this.childKind = kind;
+            },
+          },
+          {
+            label: creationNames[kind]?.[1] ?? 'Mehrere neue ' + this.nameFor(kind) + '…',
+            disabled: blocked,
+            run: () => {
+              this.showDialog('child');
+              this.childKind = kind;
+              this.childCount = 2;
+            },
+          },
+        );
+      for (const choice of this.availableActions())
+        commands.push({
+          label: choice.label,
+          disabled: blocked,
+          danger: choice.id.startsWith('delete-'),
+          run: () => this.contextAction(choice.id),
+        });
+      if (this.availableActions().some((action) => action.id === 'move-object'))
+        commands.push({
+          label: 'Ausschneiden (Verschieben)',
+          disabled: blocked,
+          run: () => this.cutNode.set({ sipId: sip.id, revision: sip.revision, node: detail.node }),
+        });
+      const cut = this.cutNode();
+      if (cut && cut.node.id !== nodeId)
+        commands.push({
+          label: 'Einfügen: ' + cut.node.name,
+          disabled:
+            blocked ||
+            cut.sipId !== sip.id ||
+            cut.revision !== sip.revision ||
+            !detail.allowed_children.includes(
+              (cut.node.kind === 'subdossier' ? 'dossier' : cut.node.kind) as ChildCreate['kind'],
+            ),
+          run: () =>
+            this.commitContextAction({
+              action: 'move-object',
+              node_id: cut.node.id,
+              target_ids: [nodeId],
+            }),
+        });
+      if (detail.can_upload_file)
+        commands.push({
+          label: 'Dateien importieren…',
+          icon: 'folder-open',
+          disabled: blocked,
+          run: () => this.showContent('files'),
+        });
+      if (source === 'files' && detail.can_upload_file && detail.node.kind === 'ordner')
+        commands.push({
+          label: 'Ordner importieren…',
+          icon: 'folder-open',
+          disabled: blocked,
+          run: () => this.showContent('folder'),
+        });
+      if (detail.file_name)
+        commands.push({
+          label: 'Datei ersetzen…',
+          disabled: blocked,
+          run: () => this.showContent('replace'),
+        });
+      if (source === 'files' && detail.node.kind === 'inhaltsverzeichnis')
+        commands.push({
+          label: 'Dateien ersetzen…',
+          disabled: blocked,
+          run: () => this.showContent('replace-many'),
+        });
+      if (
+        detail.node.kind === 'datei' &&
+        previous &&
+        ['dossier', 'subdossier', 'dokument', 'mappe'].includes(previous.node.kind)
+      )
+        commands.push({
+          label: 'Dem zuvor gewählten Objekt zuweisen',
+          disabled: blocked,
+          run: () =>
+            this.commitContextAction({
+              action: 'assign-files',
+              node_id: previous.node.id,
+              target_ids: [nodeId],
+            }),
+        });
+      if (
+        previous?.node.kind === 'datei' &&
+        ['dossier', 'subdossier', 'dokument', 'mappe'].includes(detail.node.kind)
+      )
+        commands.push({
+          label: 'Zuvor gewählte Datei zuweisen',
+          disabled: blocked,
+          run: () =>
+            this.commitContextAction({
+              action: 'assign-files',
+              node_id: nodeId,
+              target_ids: [previous.node.id],
+            }),
+        });
+      if (ownerId && source === 'classification' && detail.node.kind === 'datei') {
+        commands.push({
+          label: 'Zuweisung löschen',
+          disabled: blocked,
+          run: () => {
+            if (window.confirm('Zuweisung der Datei zum Objekt löschen?'))
+              this.commitContextAction({
+                action: 'remove-assignment',
+                node_id: ownerId,
+                target_ids: [nodeId],
+              });
+          },
+        });
+        if (['dossier', 'subdossier'].includes(this.knownNodes().get(ownerId)?.kind ?? ''))
+          commands.push({
+            label: 'Neues Dokument für diese Datei',
+            disabled: blocked,
+            run: () =>
+              this.commitContextAction({
+                action: 'document-for-file',
+                node_id: nodeId,
+                target_ids: [ownerId],
+              }),
+          });
+      }
+      if (
+        detail.node.kind === 'ordner' &&
+        previous &&
+        ['ordnungssystem', 'ordnungssystemposition', 'dossier', 'subdossier'].includes(
+          previous.node.kind,
+        )
+      )
+        commands.push({
+          label: 'Massenzuweisung auf das zuvor gewählte Objekt…',
+          disabled: blocked,
+          run: () => this.massAssignContext(previous.node.id, nodeId),
+        });
+      if (
+        previous?.node.kind === 'ordner' &&
+        ['ordnungssystem', 'ordnungssystemposition', 'dossier', 'subdossier'].includes(
+          detail.node.kind,
+        )
+      )
+        commands.push({
+          label: 'Massenzuweisung des zuvor gewählten Ordners…',
+          disabled: blocked,
+          run: () => {
+            this.contextAction('mass-assign');
+            this.actionTargetsSelected = [previous.node.id];
+          },
+        });
+    }
+    if (detail.can_add_note)
+      commands.push({
+        label: 'Neue Notiz…',
+        icon: 'sticky-note',
+        disabled: blocked,
+        separator: true,
+        run: () => this.showNotes(nodeId),
+      });
+    commands.push(
+      { label: 'Gehe zu Notiz', disabled: !detail.note_count, run: () => this.showNotes(nodeId) },
+      {
+        label: 'Kopieren',
+        icon: 'copy',
+        separator: true,
+        run: () =>
+          this.copyText(
+            source === 'dossiers'
+              ? [
+                  detail.node.name,
+                  detail.node.reference,
+                  detail.node.timespan,
+                  detail.node.appearance,
+                ].join('\t')
+              : detail.node.name,
+          ),
+      },
+    );
+    this.showContext(event, detail.node.name || detail.node.label, commands);
+  }
+
+  private contextAction(action: Action) {
+    this.actionTargetsSelected = [];
+    this.actionName = '';
+    this.actionTag = '';
+    this.actionValue = '';
+    this.actionEnd = '';
+    if (
+      ![
+        'move-up',
+        'move-down',
+        'delete-object',
+        'delete-entry',
+        'delete-note',
+        'create-documents',
+        'accumulate-timespans',
+      ].includes(action)
+    )
+      this.showDialog('actions');
+    this.setAction(action);
+    if (
+      [
+        'move-up',
+        'move-down',
+        'delete-object',
+        'delete-entry',
+        'delete-note',
+        'create-documents',
+        'accumulate-timespans',
+      ].includes(action)
+    )
+      this.applyAction();
+  }
+
+  private download(url: string) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.click();
+  }
+
+  private copyText(text: string) {
+    void this.run('Auswahl wird kopiert', async () => {
+      await navigator.clipboard.writeText(text);
+      this.message.set('Auswahl in die Zwischenablage kopiert.');
+    });
+  }
+
+  private tableKey(table: HTMLTableElement) {
+    const container = table.closest('.results, .editor') ?? this.element.nativeElement;
+    const index = [...container.querySelectorAll('table')].indexOf(table);
+    return (table.closest('.results') ? this.tool() : this.editor()) + ':' + index;
+  }
+
+  @HostListener('contextmenu', ['$event'])
+  tableContext(event: MouseEvent | KeyboardEvent) {
+    const target = event.target as HTMLElement;
+    if (target.closest('input, textarea, select, [contenteditable="true"], app-context-menu'))
+      return;
+    const table = target.closest<HTMLTableElement>('table');
+    if (!table || this.busy()) return;
+    const header = target.closest('thead');
+    if (header) {
+      const key = this.tableKey(table);
+      const hidden = this.hiddenColumns().get(key) ?? new Set<number>();
+      const cells = [...(table.tHead?.rows[0].cells ?? [])];
+      const commands: ContextCommand[] = cells.map((cell, index) => ({
+        label: cell.textContent?.trim() || 'Aktionen',
+        checked: !hidden.has(index),
+        disabled: !hidden.has(index) && cells.length - hidden.size <= 1,
+        run: () =>
+          this.hiddenColumns.update((all) => {
+            const next = new Set(all.get(key));
+            if (next.has(index)) next.delete(index);
+            else next.add(index);
+            return new Map(all).set(key, next);
+          }),
+      }));
+      commands.push(
+        {
+          label: 'Alle Spalten anzeigen',
+          separator: true,
+          run: () => this.hiddenColumns.update((all) => new Map(all).set(key, new Set())),
+        },
+        { label: 'Tabelle kopieren', icon: 'copy', run: () => this.copyTable(table) },
+      );
+      this.showContext(event, 'Tabellenspalten', commands);
+      return;
+    }
+    const row = target.closest<HTMLTableRowElement>('tbody tr');
+    if (!row) return;
+    const commands: ContextCommand[] = [];
+    this.contextRow = row;
+    if (table.closest('.results')) {
+      const index = row.sectionRowIndex;
+      switch (this.tool()) {
+        case 'validation': {
+          const issue = this.issues()[index];
+          if (!issue) return;
+          commands.push({ label: 'Im Editor anzeigen', run: () => this.navigate(issue.node_id) });
+          for (const [action, label] of this.fixChoices(issue))
+            commands.push({
+              label,
+              disabled: this.hasChanges() || !this.writable(),
+              run: () => this.fixValidation(issue, action),
+            });
+          break;
+        }
+        case 'notes': {
+          const note = this.notes()?.items[index];
+          if (!note) return;
+          commands.push(
+            {
+              label: 'Notiz bearbeiten…',
+              disabled: this.hasChanges() || !this.writable(),
+              run: () => {
+                this.noteTarget = note;
+                this.noteEditText = note.text;
+                this.showDialog('note-edit');
+              },
+            },
+            {
+              label: 'Notiz löschen',
+              danger: true,
+              disabled: this.hasChanges() || !this.writable(),
+              run: () => this.deleteNote(note.node_id),
+            },
+            { label: 'Objekt anzeigen', run: () => this.navigate(note.owner_id) },
+          );
+          break;
+        }
+        case 'sample': {
+          const item = this.samples()?.items[index];
+          if (item)
+            commands.push({ label: 'Im Editor anzeigen', run: () => this.navigate(item.node_id) });
+          break;
+        }
+        case 'search': {
+          const item = this.results()?.hits[index];
+          if (item)
+            commands.push({ label: 'Im Editor anzeigen', run: () => this.navigate(item.node_id) });
+          break;
+        }
+        case 'changes': {
+          const change = this.changes()[index];
+          if (change)
+            commands.push(
+              { label: 'Im Editor anzeigen', run: () => this.navigate(change.object.id) },
+              {
+                label: 'Änderung verwerfen',
+                danger: true,
+                disabled: this.editing(),
+                run: () => this.discardChange(change.key),
+              },
+            );
+          break;
+        }
+        case 'history': {
+          const entry = this.audit()?.items[index];
+          if (entry)
+            commands.push({
+              label: 'Ereignisdetails anzeigen',
+              run: () => this.showHistoryEvent(entry.sequence),
+            });
+          break;
+        }
+      }
+    }
+    commands.push({
+      label: 'Zeile kopieren',
+      icon: 'copy',
+      separator: !!commands.length,
+      run: () => this.copyText(this.rowText(row)),
+    });
+    this.showContext(event, 'Tabellenzeile', commands);
+  }
+
+  private rowText(row: HTMLTableRowElement) {
+    return [...row.cells]
+      .filter((cell) => !cell.hidden)
+      .map((cell) => (cell.textContent ?? '').trim().replace(/[\t\r\n]+/g, ' '))
+      .join('\t');
+  }
+
+  private copyTable(table: HTMLTableElement) {
+    this.copyText([...table.rows].map((row) => this.rowText(row)).join('\n'));
+  }
+
+  @HostListener('keydown', ['$event'])
+  contextKey(event: KeyboardEvent) {
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))
+      this.tableContext(event);
+  }
+
+  sectionContextKey(event: Event, nodeId: string) {
+    if (
+      event instanceof KeyboardEvent &&
+      (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))
+    )
+      void this.openNodeContext({ event, nodeId }, 'section');
+  }
+
+  private deleteNote(id: string) {
+    const sip = this.sip();
+    if (!sip || this.hasChanges() || !window.confirm('Notiz endgültig löschen?')) return;
+    void this.run('Notiz wird gelöscht', async () => {
+      const updated = await this.api.packageAction(sip, { action: 'delete-note', node_id: id });
+      await this.openSip(updated);
+      this.tool.set('notes');
+      await this.fetchNotes(updated, 0);
+    });
+  }
+
+  saveNote() {
+    const note = this.noteTarget;
+    const sip = this.sip();
+    if (!note || !sip || !this.noteEditText.trim() || this.hasChanges()) return;
+    void this.run('Notiz wird gespeichert', async () => {
+      const updated = await this.api.packageAction(sip, {
+        action: 'edit-note',
+        node_id: note.node_id,
+        value: this.noteEditText,
+      });
+      await this.openSip(updated);
+      this.closeDialog();
+      this.tool.set('notes');
+      await this.fetchNotes(updated, 0);
+    });
+  }
+
+  private commitContextAction(command: PackageAction) {
+    const sip = this.sip();
+    if (!sip || this.hasChanges() || !this.writable()) return;
+    void this.run('Paketaktion wird ausgeführt', async () => {
+      await this.openSip(await this.api.packageAction(sip, command));
+      this.message.set('Paketaktion gespeichert.');
+    });
+  }
+
+  private async massAssignContext(targetId: string, folderId: string) {
+    const sip = this.sip();
+    if (!sip) return;
+    await this.run('Zielobjekt wird geladen', () => this.openNode(sip, targetId));
+    if (this.error() || this.node()?.node.id !== targetId) return;
+    this.contextAction('mass-assign');
+    this.actionTargetsSelected = [folderId];
+  }
+
+  showNotes(ownerId: string | null) {
+    this.notesOwner.set(ownerId);
+    this.notes.set(null);
+    this.setTool('notes');
+  }
+
+  private showContent(mode: App['contentMode']) {
+    this.contentMode = mode;
+    this.contentFiles = [];
+    this.contentOverwrite = false;
+    this.showDialog('content');
+  }
+
+  async submitContent() {
+    const sip = this.sip();
+    const detail = this.node();
+    if (!sip || !detail || !this.contentFiles.length || this.hasChanges()) return;
+    if (
+      (this.contentMode.startsWith('replace') || this.contentOverwrite) &&
+      !window.confirm('Bestehende Dateiinhalte ersetzen und Prüfsummen neu berechnen?')
+    )
+      return;
+    await this.run('Dateien werden importiert', async () => {
+      let updated: Sip;
+      if (this.contentMode === 'replace') {
+        updated = await this.api.replaceContent(sip, detail.node.id, this.contentFiles[0]);
+      } else {
+        const archive: Zippable = Object.create(null);
+        for (const file of this.contentFiles) {
+          const path =
+            this.contentMode === 'folder' || this.contentMode === 'replace-many'
+              ? file.webkitRelativePath || file.name
+              : file.name;
+          if (Object.hasOwn(archive, path))
+            throw new Error('Mehrere Dateien haben denselben Importpfad.');
+          archive[path] = new Uint8Array(await file.arrayBuffer());
+        }
+        const bytes = await new Promise<Uint8Array>((resolve, reject) =>
+          zip(archive, { level: 0 }, (error, output) => (error ? reject(error) : resolve(output))),
+        );
+        updated = await this.api.importContent(
+          sip,
+          detail.node.id,
+          new Blob([Uint8Array.from(bytes).buffer], { type: 'application/zip' }),
+          this.contentMode === 'replace-many',
+          this.contentOverwrite,
+        );
+      }
+      await this.openSip(updated);
+      this.closeDialog();
+      this.message.set('Dateien und Prüfsummen gespeichert.');
+    });
+  }
 
   ngOnInit() {
     void this.run('Pakete werden geladen', () => this.loadPackages());
@@ -361,7 +972,7 @@ export class App implements OnInit {
     const pages = this.pages();
     const expanded = this.expanded();
     const rows: TreeRow[] = [];
-    const visit = (node: SipNode, depth: number, path: string) => {
+    const visit = (node: SipNode, depth: number, path: string, parentId?: string) => {
       if (!include(node.kind)) return;
       const key = path + '/' + node.id;
       const page = pages.get(node.id);
@@ -369,9 +980,9 @@ export class App implements OnInit {
         node.has_children &&
         (!page || page.next_offset !== null || page.items.some((child) => include(child.kind)));
       const open = expandable && expanded.has(node.id);
-      rows.push({ key, node, depth, expandable, expanded: open });
+      rows.push({ key, node, depth, expandable, expanded: open, parentId });
       if (open && page) {
-        for (const child of page.items) visit(child, depth + 1, key);
+        for (const child of page.items) visit(child, depth + 1, key, node.id);
         if (page.next_offset !== null)
           rows.push({ key: key + '/more', parent: node.id, depth: depth + 1 });
       }
@@ -426,6 +1037,8 @@ export class App implements OnInit {
   }
 
   showDialog(mode: Dialog) {
+    this.closeContext();
+    if (mode === 'child') this.childCount = 1;
     this.error.set('');
     this.selectedZip = null;
     this.selectedMetadata = null;
@@ -631,6 +1244,9 @@ export class App implements OnInit {
   }
 
   private resetSip() {
+    this.closeContext();
+    this.cutNode.set(null);
+    this.notesOwner.set(null);
     this.pending.set(new Map());
     this.sip.set(null);
     this.node.set(null);
@@ -911,7 +1527,11 @@ export class App implements OnInit {
         'Objekt wird erstellt',
         id,
         (sip, nodeId) =>
-          this.api.addChild(sip, nodeId, { kind, title: this.childTitle.trim() || null }),
+          this.api.addChild(sip, nodeId, {
+            kind,
+            count: this.childCount,
+            title: this.childTitle.trim() || null,
+          }),
         () => this.closeDialog(),
         true,
       );
@@ -1153,7 +1773,7 @@ export class App implements OnInit {
   }
 
   private async fetchNotes(sip: Sip, offset: number) {
-    const next = await this.api.notes(sip, offset);
+    const next = await this.api.notes(sip, offset, this.notesOwner());
     this.notes.set({
       ...next,
       items: [...(offset ? (this.notes()?.items ?? []) : []), ...next.items],
@@ -1162,6 +1782,7 @@ export class App implements OnInit {
 
   private async run(status: string, action: () => Promise<void>) {
     if (this.busy()) return;
+    this.closeContext();
     this.busy.set(status);
     this.error.set('');
     this.message.set('');
