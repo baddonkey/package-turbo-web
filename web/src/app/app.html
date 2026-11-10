@@ -1,0 +1,1383 @@
+<header class="chrome">
+  <nav class="menubar" aria-label="Menüleiste">
+    <details #packageMenu>
+      <summary>Paket</summary>
+      <div class="menu">
+        <button
+          type="button"
+          [disabled]="!!busy()"
+          (click)="packageMenu.open = false; showDialog('create')"
+        >
+          Neues Paket erstellen…
+        </button>
+        <button
+          type="button"
+          [disabled]="!!busy()"
+          (click)="packageMenu.open = false; showDialog('open')"
+        >
+          Paket öffnen…
+        </button>
+        @if (sip(); as active) {
+          @if (!active.metadata_only) {
+            <a [href]="api.exportUrl(active)" (click)="packageMenu.open = false">Paket zippen…</a>
+          }
+          <button
+            type="button"
+            [disabled]="!!busy()"
+            (click)="packageMenu.open = false; select(active.id)"
+          >
+            Paket neu laden
+          </button>
+          <button
+            type="button"
+            [disabled]="!!busy()"
+            (click)="packageMenu.open = false; closeSip()"
+          >
+            Paket schliessen
+          </button>
+        }
+      </div>
+    </details>
+    <details #editMenu>
+      <summary>Bearbeiten</summary>
+      <div class="menu">
+        <button
+          type="button"
+          [disabled]="!!busy() || hasChanges() || !availableActions().length"
+          (click)="editMenu.open = false; showActions()"
+        >
+          Paketaktionen…
+        </button>
+        <button
+          type="button"
+          [disabled]="!!busy() || hasChanges() || !node()?.allowed_children?.length"
+          (click)="editMenu.open = false; showDialog('child')"
+        >
+          Neues Objekt…
+        </button>
+        <button
+          type="button"
+          [disabled]="!!busy() || !node()?.can_add_note"
+          (click)="editMenu.open = false; setTool('notes')"
+        >
+          Neue Notiz…
+        </button>
+      </div>
+    </details>
+    <details #viewMenu>
+      <summary>Ansicht</summary>
+      <div class="menu">
+        <button
+          type="button"
+          [disabled]="!!busy() || !sip()"
+          (click)="viewMenu.open = false; setEditor('overview')"
+        >
+          Überblick
+        </button>
+        <button
+          type="button"
+          [disabled]="!!busy() || !sip()"
+          (click)="viewMenu.open = false; setEditor('statistics')"
+        >
+          Statistik
+        </button>
+        <button
+          type="button"
+          [disabled]="!!busy() || !sip()"
+          (click)="viewMenu.open = false; bottomTree.set('files')"
+        >
+          Paketinhalt
+        </button>
+        <button
+          type="button"
+          [disabled]="!!busy()"
+          (click)="viewMenu.open = false; setTool('changes')"
+        >
+          Änderungen
+        </button>
+      </div>
+    </details>
+    <details #extrasMenu>
+      <summary>Extras</summary>
+      <div class="menu">
+        @if (sip(); as active) {
+          <a [href]="api.metadataUrl(active)" (click)="extrasMenu.open = false"
+            >metadata.xml exportieren…</a
+          >
+          @for (report of reports; track report.id) {
+            <a
+              [href]="api.reportUrl(active, report.id)"
+              target="_blank"
+              rel="noopener"
+              (click)="extrasMenu.open = false"
+              >{{ report.label }} (Bericht)…</a
+            >
+          }
+        }
+        <button
+          type="button"
+          [disabled]="!!busy() || !sip()"
+          (click)="extrasMenu.open = false; validate('full')"
+        >
+          Vollständig validieren
+        </button>
+        <button
+          type="button"
+          [disabled]="!!busy() || !sip()"
+          (click)="extrasMenu.open = false; setTool('history')"
+        >
+          Metadaten-Historie
+        </button>
+      </div>
+    </details>
+    <details #helpMenu>
+      <summary>Hilfe</summary>
+      <div class="menu">
+        <a href="/docs">API-Dokumentation</a>
+      </div>
+    </details>
+  </nav>
+  <div class="identity">
+    <img src="/package-turbo.svg" width="32" height="32" alt="" />
+    <div class="brand"><strong>Package Turbo</strong><small>eCH-0160 SIP workspace</small></div>
+    <span class="package-name" [title]="sip()?.name ?? ''">{{
+      sip()?.name ?? 'Kein SIP geöffnet'
+    }}</span>
+    @if (sip()?.read_only) {
+      <span class="read-only">Schreibgeschützt</span>
+    }
+    @if (hasChanges()) {
+      <span class="read-only" role="status">Ungespeichert</span>
+    }
+    <form class="quick-search" (ngSubmit)="search()">
+      <input
+        name="quickQuery"
+        [(ngModel)]="query"
+        aria-label="Metadaten suchen"
+        placeholder="Metadaten suchen"
+        [disabled]="!sip() || !!busy()"
+        maxlength="160"
+      />
+      <button type="submit" aria-label="Suchen" [disabled]="!sip() || !!busy() || !query.trim()">
+        <img src="/search.svg" alt="" />
+      </button>
+    </form>
+  </div>
+  <div class="toolbar" aria-label="Paketaktionen">
+    <button type="button" [disabled]="!!busy()" (click)="showDialog('create')">
+      <img src="/file-plus.svg" alt="" /> Neues Paket
+    </button>
+    <button type="button" [disabled]="!!busy()" (click)="showDialog('open')">
+      <img src="/folder-open.svg" alt="" /> Öffnen
+    </button>
+    <button
+      type="button"
+      [disabled]="!!busy() || !hasChanges() || editing()"
+      (click)="saveChanges()"
+    >
+      <img src="/save.svg" alt="" /> Speichern
+    </button>
+    <button type="button" [disabled]="!sip() || !!busy()" (click)="closeSip()">
+      <img src="/x.svg" alt="" /> Schliessen
+    </button>
+    <span class="separator" aria-hidden="true"></span>
+    <button type="button" [disabled]="!sip() || !!busy()" (click)="validate('full')">
+      <img src="/shield-check.svg" alt="" /> Vollständig validieren
+    </button>
+    <button type="button" [disabled]="!node()?.can_add_note || !!busy()" (click)="setTool('notes')">
+      <img src="/sticky-note.svg" alt="" /> Neue Notiz
+    </button>
+    <button type="button" [disabled]="!sip() || !!busy()" (click)="setTool('history')">
+      <img src="/clock.svg" alt="" /> Metadaten-Historie
+    </button>
+  </div>
+</header>
+
+<main class="workbench" aria-label="SIP-Arbeitsbereich">
+  <section class="classification pane" aria-labelledby="classification-title">
+    <div class="pane-heading">
+      <h2 id="classification-title">Ordnungssystem-Navigator</h2>
+      <select
+        aria-label="Ordnungssystem filtern"
+        [disabled]="!sip() || !!busy()"
+        (change)="positionsOnly.set($any($event.target).value === 'positions')"
+      >
+        <option value="all">Alle anzeigen</option>
+        <option value="positions">Nur Ordnungssystempositionen</option>
+      </select>
+      <button
+        type="button"
+        class="icon-button"
+        title="Objekt hinzufügen"
+        aria-label="Objekt hinzufügen"
+        [disabled]="!node()?.allowed_children?.length || hasChanges() || !!busy()"
+        (click)="showDialog('child')"
+      >
+        +
+      </button>
+    </div>
+    <div class="scroll">
+      <app-navigator-tree
+        label="Ordnungssystem"
+        [rows]="classificationRows()"
+        [selected]="node()?.node?.id"
+        [disabled]="!!busy()"
+        (select)="navigate($event)"
+        (toggle)="toggle($event)"
+        (more)="moreChildren($event)"
+      />
+    </div>
+  </section>
+
+  <section class="lower-navigator pane" aria-label="Dossiers und Paketinhalt">
+    <nav class="tabs split-tabs" aria-label="Navigator auswählen">
+      <button
+        type="button"
+        [class.active]="bottomTree() === 'dossiers'"
+        [attr.aria-pressed]="bottomTree() === 'dossiers'"
+        (click)="bottomTree.set('dossiers')"
+      >
+        Dossiers
+      </button>
+      <button
+        type="button"
+        [class.active]="bottomTree() === 'files'"
+        [attr.aria-pressed]="bottomTree() === 'files'"
+        (click)="bottomTree.set('files')"
+      >
+        <img src="/folder-open.svg" alt="" /> Paketinhalt
+      </button>
+    </nav>
+    <div class="pane-heading">
+      <h2>{{ bottomTree() === 'dossiers' ? 'Dossiers' : 'Paket' }}</h2>
+      @if (bottomTree() === 'dossiers') {
+        <button
+          type="button"
+          class="icon-button"
+          title="Objekt hinzufügen"
+          aria-label="Objekt hinzufügen"
+          [disabled]="!node()?.allowed_children?.length || hasChanges() || !!busy()"
+          (click)="showDialog('child')"
+        >
+          +
+        </button>
+      }
+    </div>
+    <div class="scroll">
+      @if (bottomTree() === 'dossiers') {
+        <app-navigator-tree
+          label="Dossiers"
+          [columns]="true"
+          [rows]="dossierRows()"
+          [selected]="node()?.node?.id"
+          [disabled]="!!busy()"
+          (select)="navigate($event)"
+          (toggle)="toggle($event)"
+          (more)="moreChildren($event)"
+        />
+      } @else {
+        <app-navigator-tree
+          label="Paketinhalt"
+          [rows]="fileRows()"
+          [selected]="node()?.node?.id"
+          [disabled]="!!busy()"
+          (select)="navigate($event)"
+          (toggle)="toggle($event)"
+          (more)="moreChildren($event)"
+        />
+      }
+    </div>
+  </section>
+
+  <section class="editor pane" aria-label="Metadaten-Editor">
+    @if (sip(); as active) {
+      <dl class="sip-summary">
+        <div>
+          <dt>Ablieferungstyp:</dt>
+          <dd>{{ active.delivery_type || '—' }}</dd>
+        </div>
+        <div>
+          <dt>Aktenbildner:</dt>
+          <dd>{{ value(provenance(), 'aktenbildnerName') }}</dd>
+        </div>
+        <div>
+          <dt>Ablieferungsnummer:</dt>
+          <dd>{{ value(delivery(), 'ablieferungsnummer') }}</dd>
+        </div>
+        <div>
+          <dt>Erscheinungsform:</dt>
+          <dd>{{ delivery()?.node?.appearance || 'keine Angabe' }}</dd>
+        </div>
+      </dl>
+      <div class="scroll editor-body">
+        @switch (editor()) {
+          @case ('overview') {
+            @for (detail of overview(); track detail.node.id) {
+              <ng-container
+                [ngTemplateOutlet]="fields"
+                [ngTemplateOutletContext]="{ $implicit: detail }"
+              />
+            } @empty {
+              @if (node(); as detail) {
+                <ng-container
+                  [ngTemplateOutlet]="fields"
+                  [ngTemplateOutletContext]="{ $implicit: detail }"
+                />
+              }
+            }
+          }
+          @case ('object') {
+            @if (node(); as detail) {
+              <nav class="breadcrumbs" aria-label="Metadatenpfad">
+                @for (parent of crumbs(); track parent.id) {
+                  <button type="button" [disabled]="!!busy()" (click)="navigate(parent.id)">
+                    {{ parent.name }}</button
+                  ><span aria-hidden="true">›</span>
+                }
+                <span>{{ detail.node.name }}</span>
+              </nav>
+              <ng-container
+                [ngTemplateOutlet]="fields"
+                [ngTemplateOutletContext]="{ $implicit: detail }"
+              />
+              @if (detail.references.length) {
+                <section class="record-related">
+                  <h3>Dateiverweise</h3>
+                  @for (file of detail.references; track file.id) {
+                    <button
+                      class="link"
+                      type="button"
+                      [disabled]="!!busy()"
+                      (click)="navigate(file.id)"
+                    >
+                      {{ file.name }}
+                    </button>
+                  }
+                </section>
+              }
+              @if (detail.file_name || detail.can_upload_file || detail.allowed_children.length) {
+                <div class="record-actions">
+                  @if (detail.file_name; as file) {
+                    <a class="control" [href]="api.contentUrl(active, detail.node.id)"
+                      ><img src="/download.svg" alt="" /> {{ file }} herunterladen</a
+                    >
+                  }
+                  @if (availableActions().length) {
+                    <button
+                      type="button"
+                      [disabled]="!!busy() || hasChanges()"
+                      (click)="showActions()"
+                    >
+                      Paketaktionen…
+                    </button>
+                  }
+                  @if (detail.file_name && !active.read_only) {
+                    <details>
+                      <summary>Datei ersetzen…</summary>
+                      <form class="inline-form" (ngSubmit)="replaceFile(replacementInput)">
+                        <input
+                          #replacementInput
+                          type="file"
+                          aria-label="Ersatzdatei"
+                          (change)="replacement = replacementInput.files?.[0] ?? null"
+                        />
+                        <button type="submit" [disabled]="!!busy() || hasChanges() || !replacement">
+                          Ersetzen
+                        </button>
+                      </form>
+                    </details>
+                  }
+                  @if (detail.allowed_children.length) {
+                    <button
+                      type="button"
+                      [disabled]="!!busy() || hasChanges()"
+                      (click)="showDialog('child')"
+                    >
+                      + Objekt hinzufügen
+                    </button>
+                  }
+                  @if (detail.can_upload_file) {
+                    <details>
+                      <summary>Datei hinzufügen…</summary>
+                      <form class="inline-form" (ngSubmit)="attach(attachmentInput)">
+                        <input
+                          #attachmentInput
+                          type="file"
+                          aria-label="Inhaltsdatei"
+                          (change)="attachment = attachmentInput.files?.[0] ?? null"
+                        />
+                        <button type="submit" [disabled]="!!busy() || hasChanges() || !attachment">
+                          Hochladen
+                        </button>
+                      </form>
+                    </details>
+                  }
+                </div>
+              }
+            }
+          }
+          @case ('statistics') {
+            @for (group of statsGroups(); track group.title) {
+              <section class="record">
+                <h3>{{ group.title }}</h3>
+                <dl class="statistics-list">
+                  @for (row of group.rows; track row.label) {
+                    <div>
+                      <dt>{{ row.label }}</dt>
+                      <dd>{{ row.value }}</dd>
+                    </div>
+                  }
+                </dl>
+              </section>
+            }
+          }
+          @case ('validation') {
+            <section class="record">
+              <h3>Durchgeführte Prüfungen</h3>
+              <div class="record-actions">
+                <button type="button" [disabled]="!!busy()" (click)="validate('metadata')">
+                  Metadaten validieren
+                </button>
+                <button type="button" [disabled]="!!busy()" (click)="validate('full')">
+                  Vollständig validieren
+                </button>
+              </div>
+              @if (checks(); as result) {
+                <table class="check-list">
+                  <thead>
+                    <tr>
+                      <th scope="col">Gruppe</th>
+                      <th scope="col">Prüfung</th>
+                      <th scope="col">Ergebnis</th>
+                      <th scope="col"><span class="sr-only">Aktion</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (check of result.checks; track check.id) {
+                      <tr>
+                        <td>{{ check.group }}</td>
+                        <td>{{ check.label }}</td>
+                        <td>{{ check.errors }} Fehler / {{ check.warnings }} Warnungen</td>
+                        <td>
+                          <button
+                            class="link"
+                            type="button"
+                            [disabled]="!check.errors && !check.warnings"
+                            (click)="checkId.set(check.id); severity.set(''); setTool('validation')"
+                          >
+                            Anzeigen
+                          </button>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              }
+            </section>
+          }
+        }
+      </div>
+      <nav class="tabs editor-tabs" aria-label="Editoransicht">
+        <button
+          type="button"
+          [class.active]="editor() === 'overview'"
+          [attr.aria-pressed]="editor() === 'overview'"
+          (click)="setEditor('overview')"
+        >
+          Überblick
+        </button>
+        <button
+          type="button"
+          [disabled]="!!busy()"
+          [class.active]="editor() === 'statistics'"
+          [attr.aria-pressed]="editor() === 'statistics'"
+          (click)="setEditor('statistics')"
+        >
+          Statistik
+        </button>
+        <button
+          type="button"
+          [class.active]="editor() === 'validation'"
+          [attr.aria-pressed]="editor() === 'validation'"
+          (click)="setEditor('validation')"
+        >
+          Validierung
+        </button>
+        @for (kind of editorKinds; track kind) {
+          <button
+            type="button"
+            [disabled]="!!busy() || !nodeOfKind(kind)"
+            [class.active]="editor() === 'object' && nodeOfKind(kind)?.id === node()?.node?.id"
+            (click)="selectKind(kind)"
+          >
+            {{ nameFor(kind) }}
+          </button>
+        }
+      </nav>
+    } @else {
+      <div class="welcome">
+        <img src="/package-turbo.svg" alt="" width="56" height="56" />
+        <h1>Package Turbo</h1>
+        <h2>Kein SIP geöffnet</h2>
+        <p>Öffnen Sie ein SIP als ZIP-Datei oder erstellen Sie ein neues SIP.</p>
+        <div class="welcome-actions">
+          <button type="button" [disabled]="!!busy()" (click)="showDialog('open')">
+            <img src="/folder-open.svg" alt="" /> SIP öffnen
+          </button>
+          <button
+            type="button"
+            class="accent-control"
+            [disabled]="!!busy()"
+            (click)="showDialog('create')"
+          >
+            <img src="/file-plus.svg" alt="" /> Neues SIP
+          </button>
+        </div>
+        <small>Unterstützte Releases: eCH-0160 1.0, 1.1, 1.2 und 1.3</small>
+      </div>
+    }
+  </section>
+
+  <section class="results pane" aria-label="Prüfungen und Werkzeuge">
+    <nav class="tabs tool-tabs" aria-label="Werkzeugansicht">
+      @for (entry of tools; track entry.id) {
+        <button
+          type="button"
+          [class.active]="tool() === entry.id"
+          [attr.aria-pressed]="tool() === entry.id"
+          [disabled]="!!busy()"
+          (click)="setTool(entry.id)"
+        >
+          <img [src]="'/' + entry.icon + '.svg'" alt="" /> {{ entry.label }}
+          @if (entry.id === 'changes' && hasChanges()) {
+            ({{ changes().length }})
+          }
+        </button>
+      }
+    </nav>
+    @switch (tool()) {
+      @case ('validation') {
+        <div class="table-toolbar">
+          <span>{{ checks()?.errors ?? 0 }} Fehler, {{ checks()?.warnings ?? 0 }} Warnungen</span>
+          @if (checkId()) {
+            <button type="button" (click)="checkId.set('')">Alle Prüfungen</button>
+          }
+          @if (checks()?.truncated) {
+            <span>Erste 500 Hinweise</span>
+          }
+          <select
+            aria-label="Validierungshinweise filtern"
+            [disabled]="!checks()"
+            (change)="severity.set($any($event.target).value)"
+          >
+            <option value="" [selected]="!severity()">Alle anzeigen</option>
+            <option value="error" [selected]="severity() === 'error'">Fehler</option>
+            <option value="warning" [selected]="severity() === 'warning'">Warnungen</option>
+          </select>
+        </div>
+        <div class="scroll">
+          <table class="data-table validation-table">
+            <thead>
+              <tr>
+                <th scope="col">!</th>
+                <th scope="col">Objekt</th>
+                <th scope="col">Objektname</th>
+                <th scope="col">Prüfung</th>
+                <th scope="col">Beschreibung</th>
+                <th scope="col">Metadatum</th>
+                <th scope="col">Wert</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (issue of issues(); track $index) {
+                <tr>
+                  <td [class.issue-error]="issue.severity === 'error'">
+                    {{ issue.severity === 'error' ? 'Fehler' : 'Warnung' }}
+                  </td>
+                  <td>{{ issue.object_kind }}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="link"
+                      [disabled]="!!busy()"
+                      (click)="navigate(issue.node_id)"
+                    >
+                      {{ issue.name }}
+                    </button>
+                  </td>
+                  <td>{{ issue.check }}</td>
+                  <td>
+                    {{ issue.description }}
+                    @for (fix of fixChoices(issue); track fix[0]) {
+                      <button
+                        class="link"
+                        type="button"
+                        [disabled]="!!busy() || hasChanges()"
+                        (click)="fixValidation(issue, fix[0])"
+                      >
+                        {{ fix[1] }}
+                      </button>
+                    }
+                  </td>
+                  <td>{{ issue.field }}</td>
+                  <td [title]="issue.path">{{ issue.value || issue.path }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+      @case ('sample') {
+        <form class="table-toolbar" (ngSubmit)="drawSample()">
+          <label
+            >Modus
+            <select name="sampleMode" [(ngModel)]="sampleMode">
+              <option value="absolute">Anzahl</option>
+              <option value="percent">Prozent</option>
+            </select></label
+          >
+          <label
+            >Grösse
+            <input
+              name="sampleSize"
+              type="number"
+              [(ngModel)]="sampleSize"
+              min="1"
+              [max]="sampleMode === 'absolute' ? 500 : 100"
+              required
+          /></label>
+          <button type="submit" [disabled]="!sip() || !!busy()">Ziehen</button>
+          <button type="button" [disabled]="!samples()?.items?.length" (click)="exportSample()">
+            Export
+          </button>
+        </form>
+        <div class="scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Aktenzeichen</th>
+                <th scope="col">Dossier</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (item of samples()?.items ?? []; track item.node_id) {
+                <tr>
+                  <td>{{ item.reference }}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="link"
+                      [disabled]="!!busy()"
+                      (click)="navigate(item.node_id)"
+                    >
+                      {{ item.name }}
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+      @case ('search') {
+        <div class="table-toolbar">
+          <button type="button" [attr.aria-pressed]="!advanced()" (click)="setAdvanced(false)">
+            Einfache Suche
+          </button>
+          <button
+            type="button"
+            [attr.aria-pressed]="advanced()"
+            [disabled]="!sip() || !!busy()"
+            (click)="setAdvanced(true)"
+          >
+            Erweiterte Suche
+          </button>
+        </div>
+        @if (advanced()) {
+          <form class="advanced-search" (ngSubmit)="advancedSearch()">
+            <label
+              >Objekttyp
+              <select
+                name="searchKind"
+                [ngModel]="searchKind"
+                (ngModelChange)="changeSearchKind($event)"
+              >
+                @for (kind of searchKinds(); track kind) {
+                  <option [value]="kind">{{ nameFor(kind) }}</option>
+                }
+              </select></label
+            >
+            @for (criterion of criteria; track $index; let i = $index) {
+              <div class="criteria-row">
+                <select
+                  [name]="'field-' + i"
+                  [(ngModel)]="criterion.tag"
+                  [attr.aria-label]="'Metadatum ' + (i + 1)"
+                >
+                  <option value="">Metadatum auswählen</option>
+                  @for (option of searchOptions()[searchKind] ?? []; track option.tag) {
+                    <option [value]="option.tag">{{ option.label }}</option>
+                  }
+                </select>
+                <input
+                  [name]="'value-' + i"
+                  [(ngModel)]="criterion.value"
+                  maxlength="160"
+                  [disabled]="criterion.empty"
+                  [attr.aria-label]="'Suchwert ' + (i + 1)"
+                />
+                <label
+                  ><input [name]="'empty-' + i" [(ngModel)]="criterion.empty" type="checkbox" />
+                  Leer</label
+                >
+              </div>
+            }
+            <button type="button" [disabled]="criteria.length >= 3" (click)="addCriterion()">
+              + Bedingung
+            </button>
+            <button type="submit" [disabled]="!sip() || !!busy()">Suchen</button>
+          </form>
+        } @else {
+          <form class="table-toolbar search-form" (ngSubmit)="search()">
+            <input
+              name="query"
+              [(ngModel)]="query"
+              aria-label="Suchbegriff"
+              placeholder="Metadaten suchen"
+              maxlength="160"
+              [disabled]="!sip() || !!busy()"
+            />
+            <button type="submit" [disabled]="!sip() || !!busy() || !query.trim()">Suchen</button>
+            @if (results(); as result) {
+              <span>{{ result.hits.length }} Treffer</span>
+            }
+          </form>
+        }
+        <div class="scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Objekt</th>
+                <th scope="col">Objektname</th>
+                <th scope="col">Metadatum</th>
+                <th scope="col">Wert</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (hit of results()?.hits ?? []; track $index) {
+                <tr>
+                  <td>{{ hit.object }}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="link"
+                      [disabled]="!!busy()"
+                      (click)="navigate(hit.node_id)"
+                    >
+                      {{ hit.name || hit.object }}
+                    </button>
+                  </td>
+                  <td>{{ hit.field }}</td>
+                  <td>{{ hit.value }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+      @case ('notes') {
+        @if (node()?.can_add_note) {
+          <form class="table-toolbar search-form" (ngSubmit)="addNote()">
+            <input
+              name="note"
+              [(ngModel)]="noteText"
+              aria-label="Neue Notiz"
+              placeholder="Notiz zum ausgewählten Objekt…"
+              maxlength="4000"
+            />
+            <button type="submit" [disabled]="!!busy() || hasChanges() || !noteText.trim()">
+              Notiz speichern
+            </button>
+          </form>
+        }
+        <div class="scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Objekt</th>
+                <th scope="col">Objektname</th>
+                <th scope="col">Notiz</th>
+                <th scope="col">Datum</th>
+                <th scope="col">Erfasser</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (item of notes()?.items ?? []; track item.node_id) {
+                <tr>
+                  <td>{{ item.object_kind }}</td>
+                  <td>{{ item.object_name }}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="link"
+                      [disabled]="!!busy()"
+                      (click)="navigate(item.node_id)"
+                    >
+                      {{ item.text }}
+                    </button>
+                  </td>
+                  <td>{{ item.created }}</td>
+                  <td>{{ item.author }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          @if (notes()?.next_offset != null) {
+            <button type="button" [disabled]="!!busy()" (click)="moreNotes()">
+              Weitere Notizen
+            </button>
+          }
+        </div>
+      }
+      @case ('changes') {
+        <div class="table-toolbar changes-toolbar">
+          <span>{{ changes().length }} Änderungen seit dem letzten Speichern</span>
+          <button type="button" [disabled]="!!busy() || !hasChanges()" (click)="copyChanges()">
+            Kopieren
+          </button>
+          <button type="button" [disabled]="!hasChanges()" (click)="exportChanges()">Export</button>
+          <button
+            type="button"
+            [disabled]="!!busy() || !hasChanges() || editing()"
+            (click)="discardChanges()"
+          >
+            Alle verwerfen
+          </button>
+        </div>
+        <div class="scroll">
+          <table class="data-table changes-table">
+            <thead>
+              <tr>
+                <th scope="col">Zeit</th>
+                <th scope="col">Objekt</th>
+                <th scope="col">Objektname</th>
+                <th scope="col">Metadatum</th>
+                <th scope="col">Wert</th>
+                <th scope="col">Gespeicherter Wert</th>
+                <th scope="col"><span class="sr-only">Aktionen</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (change of changes(); track change.key) {
+                <tr>
+                  <td>{{ change.time | date: 'dd.MM.yyyy HH:mm:ss' }}</td>
+                  <td>{{ change.object.label }}</td>
+                  <td>
+                    <button
+                      class="link"
+                      type="button"
+                      [disabled]="!!busy()"
+                      (click)="navigate(change.object.id)"
+                    >
+                      {{ change.object.name }}
+                    </button>
+                  </td>
+                  <td>{{ change.field.label }}</td>
+                  <td>{{ change.field.values.join(' · ') }}</td>
+                  <td>{{ change.saved.values.join(' · ') }}</td>
+                  <td>
+                    <button
+                      class="link"
+                      type="button"
+                      [disabled]="!!busy() || editing()"
+                      [attr.aria-label]="change.field.label + ': Änderung verwerfen'"
+                      (click)="discardChange(change.key)"
+                    >
+                      ×
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+      @case ('history') {
+        @if (sip(); as active) {
+          @if (audit()?.items?.length) {
+            <form class="table-toolbar">
+              <label
+                >METS-Version
+                <select name="metsVersion" [(ngModel)]="metsVersion">
+                  <option>2</option>
+                  <option>1.12.1</option>
+                </select></label
+              >
+              <label
+                ><input type="checkbox" name="redact" [(ngModel)]="redactPreservation" /> Werte
+                redigieren</label
+              >
+              <a [href]="api.preservationUrl(active, 'premis', metsVersion, redactPreservation)"
+                >PREMIS exportieren</a
+              >
+              <a [href]="api.preservationUrl(active, 'bundle', metsVersion, redactPreservation)"
+                >SIP + PREMIS + METS exportieren</a
+              >
+            </form>
+          }
+        }
+        <div class="scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Nr.</th>
+                <th scope="col">Zeitpunkt</th>
+                <th scope="col">Ereignis</th>
+                <th scope="col">Bearbeitet durch</th>
+                <th scope="col">Status</th>
+                <th scope="col">Prüfsumme</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (event of audit()?.items ?? []; track event.sequence) {
+                <tr>
+                  <td>{{ event.sequence }}</td>
+                  <td>{{ event.time | date: 'dd.MM.yyyy HH:mm:ss' }}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="link"
+                      [disabled]="!!busy()"
+                      (click)="showHistoryEvent(event.sequence)"
+                    >
+                      {{ event.type }}
+                    </button>
+                  </td>
+                  <td>{{ event.operator }}</td>
+                  <td>{{ event.outcome }}</td>
+                  <td class="digest">{{ event.digest }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          @if (audit()?.next_offset != null) {
+            <button type="button" [disabled]="!!busy()" (click)="moreHistory()">
+              Weitere Ereignisse
+            </button>
+          }
+        </div>
+      }
+    }
+  </section>
+</main>
+
+<footer class="statusbar" aria-live="polite">
+  @if (error()) {
+    <span class="issue-error" role="alert">{{ error() }}</span>
+  } @else {
+    <span>{{ busy() || message() || 'Bereit' }}</span>
+  }
+  @if (sip()) {
+    <span>{{ checks()?.errors ?? 0 }} Fehler, {{ checks()?.warnings ?? 0 }} Warnungen</span>
+  }
+</footer>
+
+<ng-template #fields let-detail>
+  <section class="record">
+    <h3>{{ detail.node.label }} – {{ detail.node.name }}</h3>
+    <div class="field-group">
+      @for (entry of fieldsFor(detail); track entry.key) {
+        @if (entry.field.tag !== 'zusatzDaten' && (entry.field.primary || !hasPrimary(detail))) {
+          <app-metadata-field
+            #editorField
+            [id]="entry.key"
+            [field]="entry.field"
+            [disabled]="!!busy()"
+            (save)="stageField(detail, editorField, $event)"
+          />
+        }
+      }
+      @if (hasAdditional(detail)) {
+        <details class="additional">
+          <summary>Weitere Angaben</summary>
+          @for (entry of fieldsFor(detail); track entry.key) {
+            @if (!entry.field.primary && entry.field.tag !== 'zusatzDaten') {
+              <app-metadata-field
+                #editorField
+                [id]="entry.key"
+                [field]="entry.field"
+                [disabled]="!!busy()"
+                (save)="stageField(detail, editorField, $event)"
+              />
+            }
+          }
+        </details>
+      }
+      @for (entry of fieldsFor(detail); track entry.key) {
+        @if (entry.field.tag === 'zusatzDaten') {
+          <app-metadata-field [id]="entry.key" [field]="entry.field" />
+        }
+      }
+      @if (!sip()?.read_only && detail.additional_data) {
+        <button
+          type="button"
+          [disabled]="!!busy() || hasChanges()"
+          (click)="showProperties(detail, 'additional')"
+        >
+          Zusatzdaten bearbeiten…
+        </button>
+      }
+      @if (!sip()?.read_only && detail.file_properties) {
+        <button
+          type="button"
+          [disabled]="!!busy() || hasChanges()"
+          (click)="showProperties(detail, 'file')"
+        >
+          Dateieigenschaften bearbeiten…
+        </button>
+      }
+      @for (row of detail.reference_attributes ?? []; track row.index) {
+        <details class="additional">
+          <summary>Dateiverweis – {{ row.name }}</summary>
+          @for (attribute of row.attributes; track attribute.name) {
+            <form
+              class="inline-form"
+              (ngSubmit)="saveReference(detail, row.index, attribute.name, value.value)"
+            >
+              <label
+                >{{ attribute.name }}
+                <input
+                  #value
+                  [value]="attribute.value"
+                  [readOnly]="!attribute.editable"
+                  [required]="attribute.required"
+              /></label>
+              @if (attribute.editable) {
+                <button type="submit" [disabled]="!!busy() || hasChanges()">Speichern</button>
+              }
+            </form>
+          }
+        </details>
+      }
+    </div>
+  </section>
+</ng-template>
+
+<dialog #dialog class="sip-dialog" aria-labelledby="dialog-title">
+  @switch (mode()) {
+    @case ('open') {
+      <h2 id="dialog-title">Paket öffnen</h2>
+      <p>Wählen Sie ein vorhandenes Paket oder importieren Sie ein SIP als ZIP.</p>
+      <div class="saved-packages">
+        @for (item of packages(); track item.id) {
+          <button type="button" [disabled]="!!busy()" (click)="select(item.id)">
+            {{ item.name }} <small>{{ item.delivery_type }} · {{ item.schema_version }}</small>
+          </button>
+        }
+      </div>
+      @if (hasMore()) {
+        <button type="button" [disabled]="!!busy()" (click)="morePackages()">
+          Weitere Pakete anzeigen
+        </button>
+      }
+      <form (ngSubmit)="import()">
+        <label
+          >ZIP-Datei<input
+            type="file"
+            accept=".zip,application/zip"
+            (change)="selectedZip = $any($event.target).files?.[0] ?? null"
+        /></label>
+        <label
+          >Schreibgeschützt
+          <input name="importReadOnly" type="checkbox" [(ngModel)]="importReadOnly"
+        /></label>
+        <div class="dialog-actions">
+          <button type="button" (click)="closeDialog()">Abbrechen</button
+          ><button type="submit" class="accent-control" [disabled]="!!busy() || !selectedZip">
+            ZIP importieren
+          </button>
+        </div>
+      </form>
+      <form (ngSubmit)="importMetadata()">
+        <label
+          >Einzelne metadata.xml<input
+            type="file"
+            accept=".xml,application/xml"
+            (change)="selectedMetadata = $any($event.target).files?.[0] ?? null"
+        /></label>
+        <div class="dialog-actions">
+          <button type="submit" [disabled]="!!busy() || !selectedMetadata">
+            XML schreibgeschützt öffnen
+          </button>
+        </div>
+      </form>
+    }
+    @case ('create') {
+      <h2 id="dialog-title">Neues Paket erstellen</h2>
+      <form (ngSubmit)="create()">
+        <label
+          >Abliefernde Stelle<input name="office" [(ngModel)]="office" required maxlength="160"
+        /></label>
+        <label
+          >Referenz (optional)<input name="reference" [(ngModel)]="reference" maxlength="160"
+        /></label>
+        <label
+          >Aktenbildner (optional)<input name="creator" [(ngModel)]="creator" maxlength="160"
+        /></label>
+        <label
+          >Ordnungssystem (optional)<input
+            name="systemName"
+            [(ngModel)]="systemName"
+            maxlength="160"
+        /></label>
+        <label
+          >Ablieferungstyp<select name="deliveryType" [(ngModel)]="deliveryType">
+            <option>GEVER</option>
+            <option>FILES</option>
+          </select></label
+        >
+        <label
+          >eCH-0160 Release<select name="release" [(ngModel)]="release">
+            <option>1.3</option>
+            <option>1.2</option>
+            <option>1.1</option>
+            <option>1.0</option>
+          </select></label
+        >
+        <label
+          >SIP-Name (optional)<input name="packageName" [(ngModel)]="packageName" maxlength="160"
+        /></label>
+        <label
+          >Ordnungssystem als CSV (optional)<input
+            type="file"
+            accept=".csv,text/csv"
+            (change)="classificationCsv = $any($event.target).files?.[0] ?? null"
+        /></label>
+        <div class="dialog-actions">
+          <button type="button" (click)="closeDialog()">Abbrechen</button
+          ><button type="submit" class="accent-control" [disabled]="!!busy() || !office.trim()">
+            Erstellen
+          </button>
+        </div>
+      </form>
+    }
+    @case ('event') {
+      <h2 id="dialog-title">Historienereignis</h2>
+      <pre class="event-details">{{ eventDetails() }}</pre>
+      <div class="dialog-actions">
+        <button type="button" (click)="closeDialog()">Schliessen</button>
+      </div>
+    }
+    @case ('cleanup') {
+      <h2 id="dialog-title">Sicherungskopien bereinigen</h2>
+      <form (ngSubmit)="previewCleanup()">
+        <label
+          >Kopien behalten<input
+            name="cleanupKeep"
+            type="number"
+            min="1"
+            max="100"
+            [(ngModel)]="cleanupKeep"
+            (ngModelChange)="cleanup.set(null)"
+        /></label>
+        <label
+          >Mindestalter (Tage)<input
+            name="cleanupDays"
+            type="number"
+            min="0"
+            max="3650"
+            [(ngModel)]="cleanupDays"
+            (ngModelChange)="cleanup.set(null)"
+        /></label>
+        <button type="submit" [disabled]="!!busy()">Vorschau berechnen</button>
+      </form>
+      @if (cleanup(); as result) {
+        <p>{{ result.candidates.length }} Kopien · {{ result.reclaimBytes }} Bytes</p>
+        <ul>
+          @for (item of result.candidates; track item.path) {
+            <li>{{ item.path }} · {{ item.bytes }} Bytes</li>
+          }
+        </ul>
+        <details>
+          <summary>Geschützte Daten</summary>
+          <ul>
+            @for (item of result.protected; track item.path) {
+              <li>{{ item.path }} · {{ item.reason }}</li>
+            }
+          </ul>
+        </details>
+      }
+      <div class="dialog-actions">
+        <button type="button" (click)="closeDialog()">Abbrechen</button>
+        <button
+          type="button"
+          [disabled]="!!busy() || !cleanup()?.candidates?.length"
+          (click)="applyCleanup()"
+        >
+          Bereinigen
+        </button>
+      </div>
+    }
+    @case ('properties') {
+      <h2 id="dialog-title">
+        {{ propertyGroup === 'additional' ? 'Zusatzdaten' : 'Dateieigenschaften' }}
+      </h2>
+      <form (ngSubmit)="saveProperties()">
+        @for (row of propertyRows; track row; let i = $index) {
+          <div class="criteria-row">
+            <input
+              [name]="'propertyName-' + i"
+              aria-label="Name"
+              [(ngModel)]="row.name"
+              maxlength="160"
+              required
+            />
+            <input [name]="'propertyValue-' + i" aria-label="Wert" [(ngModel)]="row.value" />
+            <button
+              type="button"
+              aria-label="Eigenschaft entfernen"
+              (click)="propertyRows.splice(i, 1)"
+            >
+              ×
+            </button>
+          </div>
+        }
+        <button
+          type="button"
+          [disabled]="propertyRows.length >= 200"
+          (click)="propertyRows.push({ name: '', value: '' })"
+        >
+          + Merkmal
+        </button>
+        <div class="dialog-actions">
+          <button type="button" (click)="closeDialog()">Abbrechen</button>
+          <button type="submit" class="accent-control" [disabled]="!!busy()">Speichern</button>
+        </div>
+      </form>
+    }
+    @case ('actions') {
+      <h2 id="dialog-title">Paketaktionen – {{ node()?.node?.name }}</h2>
+      <form (ngSubmit)="applyAction()">
+        <label
+          >Aktion<select name="action" [ngModel]="actionType()" (ngModelChange)="setAction($event)">
+            <option value="">Aktion auswählen</option>
+            @for (option of availableActions(); track option.id) {
+              <option [value]="option.id">{{ option.label }}</option>
+            }
+          </select></label
+        >
+        @if (
+          ['assign-files', 'remove-assignment', 'move-object', 'mass-assign'].includes(actionType())
+        ) {
+          <label
+            >Zielobjekte<select name="targets" [(ngModel)]="actionTargetsSelected" multiple>
+              @for (option of actionTargets(); track option.id) {
+                <option [value]="option.id">{{ option.label }} – {{ option.name }}</option>
+              }
+            </select></label
+          >
+          <p>Öffnen Sie bei Bedarf zuerst die betreffenden Zweige im Navigator.</p>
+        }
+        @if (actionType() === 'rename-entry' || actionType() === 'new-folder') {
+          <label
+            >Name<input name="entryName" [(ngModel)]="actionName" maxlength="160" required
+          /></label>
+        }
+        @if (actionType() === 'renumber') {
+          <label
+            >Nummerierung<select name="scheme" [(ngModel)]="actionScheme">
+              <option value="decimal">Zehnergliederung</option>
+              <option value="hundred">Hundertergliederung</option>
+            </select></label
+          >
+        }
+        @if (actionType() === 'mass-edit') {
+          <label
+            >Objekttyp<select
+              name="massKind"
+              [(ngModel)]="actionKind"
+              (ngModelChange)="actionTag = ''"
+            >
+              @for (kind of searchKinds(); track kind) {
+                <option [value]="kind">{{ nameFor(kind) }}</option>
+              }
+            </select></label
+          >
+          <label
+            >Metadatum<select name="massTag" [(ngModel)]="actionTag" required>
+              <option value="">Metadatum auswählen</option>
+              @for (option of searchOptions()[actionKind] ?? []; track option.tag) {
+                <option [value]="option.tag">{{ option.label }}</option>
+              }
+            </select></label
+          >
+          <label>Wert<input name="massValue" [(ngModel)]="actionValue" /></label>
+          <label>Bis (Zeitraum)<input name="massEnd" [(ngModel)]="actionEnd" /></label>
+        }
+        @if (actionType() === 'mass-assign') {
+          <label
+            >Ordnungssystem-Stufen<input
+              name="positionLevels"
+              type="number"
+              [(ngModel)]="positionLevels"
+              min="0"
+              max="20"
+          /></label>
+          <label
+            >Dossier-Stufen<input
+              name="dossierLevels"
+              type="number"
+              [(ngModel)]="dossierLevels"
+              min="0"
+              max="20"
+          /></label>
+          <label
+            >Obersten Ordner übernehmen<input
+              name="includeTop"
+              type="checkbox"
+              [(ngModel)]="includeTop"
+          /></label>
+        }
+        @if (actionType() === 'assign-files' || actionType() === 'mass-assign') {
+          <label
+            >Dokumente erstellen<input
+              name="createDocuments"
+              type="checkbox"
+              [(ngModel)]="createDocuments"
+          /></label>
+        }
+        <div class="dialog-actions">
+          <button type="button" (click)="closeDialog()">Abbrechen</button>
+          <button type="submit" class="accent-control" [disabled]="!!busy() || !actionType()">
+            Ausführen
+          </button>
+        </div>
+      </form>
+    }
+    @case ('child') {
+      <h2 id="dialog-title">Objekt hinzufügen</h2>
+      <form (ngSubmit)="addChild()">
+        <label
+          >Objekttyp<select name="kind" [(ngModel)]="childKind">
+            <option value="">Typ auswählen</option>
+            @for (kind of node()?.allowed_children ?? []; track kind) {
+              <option [value]="kind">{{ nameFor(kind) }}</option>
+            }
+          </select></label
+        >
+        <label
+          >Titel (optional)<input name="title" maxlength="160" [(ngModel)]="childTitle"
+        /></label>
+        <div class="dialog-actions">
+          <button type="button" (click)="closeDialog()">Abbrechen</button
+          ><button type="submit" class="accent-control" [disabled]="!!busy() || !childKind">
+            Hinzufügen
+          </button>
+        </div>
+      </form>
+    }
+  }
+  @if (error()) {
+    <p class="issue-error" role="alert">{{ error() }}</p>
+  }
+</dialog>

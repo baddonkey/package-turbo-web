@@ -1,0 +1,119 @@
+<div class="field">
+  <div class="field-label">
+    {{ field().label }}
+    @if (field().min_items && field().editable) {
+      <span title="Pflichtfeld">*</span>
+    }
+  </div>
+  @if (!editing()) {
+    @if (field().editable) {
+      <button
+        type="button"
+        class="field-display"
+        [class.choice]="field().choices.length > 0"
+        [disabled]="disabled()"
+        (click)="start()"
+        [attr.aria-label]="field().label + ' bearbeiten'"
+      >
+        <ng-container [ngTemplateOutlet]="values"></ng-container>
+      </button>
+    } @else {
+      <div class="field-display readonly">
+        <ng-container [ngTemplateOutlet]="values"></ng-container>
+      </div>
+    }
+  } @else {
+    <form
+      (submit)="$event.preventDefault(); submit()"
+      (focusout)="applyWhenFocusLeaves($event)"
+      (keydown)="handleKeydown($event)"
+    >
+      <div class="inputs" [class.span-values]="field().kind === 'timespan'">
+        @for (row of rows(); track row.id; let index = $index) {
+          <div class="input-row">
+            <label [class.sr-only]="field().kind !== 'timespan'" [for]="id() + '-' + row.id">
+              @if (field().kind === 'timespan') {
+                {{ index === 0 ? 'von' : 'bis' }}
+              } @else {
+                {{ field().label }} {{ index + 1 }}
+              }
+            </label>
+            @if (field().choices.length) {
+              <select
+                [id]="id() + '-' + row.id"
+                [value]="row.value"
+                [disabled]="disabled()"
+                (change)="update(index, $any($event.target).value)"
+              >
+                <option value="" [selected]="!row.value">Auswählen…</option>
+                @if (row.value && !field().choices.includes(row.value)) {
+                  <option [value]="row.value" selected>{{ row.value }}</option>
+                }
+                @for (choice of field().choices; track choice) {
+                  <option [value]="choice" [selected]="choice === row.value">{{ choice }}</option>
+                }
+              </select>
+            } @else {
+              <textarea
+                rows="1"
+                [id]="id() + '-' + row.id"
+                [value]="row.value"
+                [disabled]="disabled()"
+                [attr.maxlength]="field().max_length ?? 32768"
+                (input)="update(index, $any($event.target).value)"
+              ></textarea>
+            }
+            @if (field().kind === 'repeated') {
+              <button
+                type="button"
+                [disabled]="disabled() || index === 0"
+                (click)="move(index, -1)"
+                [attr.aria-label]="'Wert ' + (index + 1) + ' nach oben'"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                [disabled]="disabled() || index === rows().length - 1"
+                (click)="move(index, 1)"
+                [attr.aria-label]="'Wert ' + (index + 1) + ' nach unten'"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                [disabled]="disabled() || rows().length <= field().min_items"
+                (click)="remove(index)"
+                [attr.aria-label]="'Wert ' + (index + 1) + ' entfernen'"
+              >
+                ×
+              </button>
+            }
+          </div>
+        }
+      </div>
+      <div class="field-actions">
+        @if (field().kind === 'repeated') {
+          <button
+            type="button"
+            [disabled]="disabled() || rows().length >= (field().max_items ?? 200)"
+            (click)="add()"
+          >
+            Wert hinzufügen
+          </button>
+        }
+      </div>
+    </form>
+  }
+</div>
+
+<ng-template #values>
+  @if (field().kind === 'timespan') {
+    <span class="span-display"
+      ><span>von</span><span>{{ field().values[0] }}</span
+      ><span>bis</span><span>{{ field().values[1] }}</span></span
+    >
+  } @else {
+    {{ field().values.join(' · ') || (field().tag === 'zusatzDaten' ? 'keine Merkmale' : '') }}
+  }
+</ng-template>

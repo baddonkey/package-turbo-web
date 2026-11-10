@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "package-turbo"
+version = "0.1.0"
+description = "Package Turbo - browser workspace for eCH-0160 Submission Information Packages."
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "lxml>=5.0",
+    "msoffcrypto-tool>=6.1",
+    "pypdf>=5.0",
+    "rfc8785>=0.1,<1",
+]
+
+[project.optional-dependencies]
+web = [
+    "anyio>=4,<5",
+    "fastapi>=0.136,<1",
+    "filelock>=3.20,<4",
+    "pydantic>=2,<3",
+    "starlette>=0.48,<2",
+    "uvicorn>=0.40,<1",
+]
+web-test = ["pytest>=8", "httpx>=0.28,<1"]
+dev = ["pytest>=8", "openpyxl>=3.1"]
+
+[tool.setuptools]
+packages = ["ph_backend", "ph_web"]
+
+[tool.setuptools.package-data]
+ph_backend = ["resources/*.csv", "resources/xsd/*.xsd", "resources/xsd/*/*.xsd", "resources/preservation/*.xsd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

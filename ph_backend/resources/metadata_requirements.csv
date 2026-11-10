@@ -1,0 +1,219 @@
+﻿release,schemaVersion,profile,entity,xsdName,dataType,sourceSheet,sourceRow
+1.0,4.0,FILES,Ablieferung,ablieferungstyp,enumeration,Ablieferung,5
+1.0,4.0,FILES,Ablieferung,ablieferndeStelle,text,Ablieferung,7
+1.0,4.0,FILES,Datei,name,text,Datei,4
+1.0,4.0,FILES,Datei,id,text,Datei,6
+1.0,4.0,FILES,Datei,pruefalgorithmus,enumeration,Datei,7
+1.0,4.0,FILES,Datei,pruefsumme,text,Datei,8
+1.0,4.0,FILES,Dokument,titel,text,Dokument,4
+1.0,4.0,FILES,Dokument,id,text,Dokument,5
+1.0,4.0,FILES,Dokument,erscheinungsform,enumeration,Dokument,7
+1.0,4.0,FILES,Dokument,dateiRef,complex,Dokument,18
+1.0,4.0,FILES,Dossier,titel,text,Dossier,6
+1.0,4.0,FILES,Dossier,id,text,Dossier,8
+1.0,4.0,FILES,Dossier,entstehungszeitraum,datumstyp 2,Dossier,15
+1.0,4.0,FILES,Ordner,name,text,Ordner,4
+1.0,4.0,FILES,Paket,paketTyp,text,Paket,7
+1.0,4.0,FILES,Paket,schemaVersion,text (token),Paket,10
+1.0,4.0,FILES,Provenienz,aktenbildnerName,text,Provenienz,4
+1.0,4.0,FILES,Provenienz,systemName,text,Provenienz,5
+1.0,4.0,FILES,Provenienz,systemBeschreibung,text,Provenienz,6
+1.0,4.0,GEVER,Ablieferung,ablieferungstyp,enumeration,Ablieferung,5
+1.0,4.0,GEVER,Ablieferung,ablieferndeStelle,text,Ablieferung,7
+1.0,4.0,GEVER,Datei,name,text,Datei,4
+1.0,4.0,GEVER,Datei,id,text,Datei,6
+1.0,4.0,GEVER,Datei,pruefalgorithmus,enumeration,Datei,7
+1.0,4.0,GEVER,Datei,pruefsumme,text,Datei,8
+1.0,4.0,GEVER,Dokument,titel,text,Dokument,4
+1.0,4.0,GEVER,Dokument,id,text,Dokument,5
+1.0,4.0,GEVER,Dokument,erscheinungsform,enumeration,Dokument,7
+1.0,4.0,GEVER,Dokument,dateiRef,complex,Dokument,18
+1.0,4.0,GEVER,Dossier,aktenzeichen,text,Dossier,4
+1.0,4.0,GEVER,Dossier,titel,text,Dossier,6
+1.0,4.0,GEVER,Dossier,id,text,Dossier,8
+1.0,4.0,GEVER,Dossier,entstehungszeitraum,datumstyp 2,Dossier,15
+1.0,4.0,GEVER,Ordner,name,text,Ordner,4
+1.0,4.0,GEVER,Ordnungssystem,name,text,Ordnungssystem,4
+1.0,4.0,GEVER,Ordnungssystemposition,nummer,text,Ordnungssystemposition,4
+1.0,4.0,GEVER,Ordnungssystemposition,titel,text,Ordnungssystemposition,5
+1.0,4.0,GEVER,Ordnungssystemposition,id,text,Ordnungssystemposition,6
+1.0,4.0,GEVER,Paket,paketTyp,text,Paket,7
+1.0,4.0,GEVER,Paket,schemaVersion,text (token),Paket,10
+1.0,4.0,GEVER,Provenienz,aktenbildnerName,text,Provenienz,4
+1.0,4.0,GEVER,Provenienz,registratur,text,Provenienz,9
+1.1,4.1,FILES,Ablieferung,ablieferungstyp,enumeration,Ablieferung,5
+1.1,4.1,FILES,Ablieferung,ablieferndeStelle,text,Ablieferung,7
+1.1,4.1,FILES,Datei,name,text,Datei,4
+1.1,4.1,FILES,Datei,id,text,Datei,6
+1.1,4.1,FILES,Datei,pruefalgorithmus,enumeration,Datei,7
+1.1,4.1,FILES,Datei,pruefsumme,text,Datei,8
+1.1,4.1,FILES,Dokument,titel,text,Dokument,4
+1.1,4.1,FILES,Dokument,id,text,Dokument,5
+1.1,4.1,FILES,Dokument,erscheinungsform,enumeration,Dokument,7
+1.1,4.1,FILES,Dokument,dateiRef,complex,Dokument,18
+1.1,4.1,FILES,Dossier,titel,text,Dossier,6
+1.1,4.1,FILES,Dossier,id,text,Dossier,8
+1.1,4.1,FILES,Dossier,entstehungszeitraum,datumstyp 2,Dossier,15
+1.1,4.1,FILES,Ordner,name,text,Ordner,4
+1.1,4.1,FILES,Paket,paketTyp,text,Paket,7
+1.1,4.1,FILES,Paket,schemaVersion,text (token),Paket,10
+1.1,4.1,FILES,Provenienz,aktenbildnerName,text,Provenienz,4
+1.1,4.1,FILES,Provenienz,systemName,text,Provenienz,5
+1.1,4.1,FILES,Provenienz,systemBeschreibung,text,Provenienz,6
+1.1,4.1,GEVER,Ablieferung,ablieferungstyp,enumeration,Ablieferung,5
+1.1,4.1,GEVER,Ablieferung,ablieferndeStelle,text,Ablieferung,7
+1.1,4.1,GEVER,Aktivität,vorschreibung,text,Aktivität,4
+1.1,4.1,GEVER,Datei,name,text,Datei,4
+1.1,4.1,GEVER,Datei,id,text,Datei,6
+1.1,4.1,GEVER,Datei,pruefalgorithmus,enumeration,Datei,7
+1.1,4.1,GEVER,Datei,pruefsumme,text,Datei,8
+1.1,4.1,GEVER,Dokument,titel,text,Dokument,4
+1.1,4.1,GEVER,Dokument,id,text,Dokument,5
+1.1,4.1,GEVER,Dokument,erscheinungsform,enumeration,Dokument,7
+1.1,4.1,GEVER,Dokument,dateiRef,complex,Dokument,18
+1.1,4.1,GEVER,Dossier,aktenzeichen,text,Dossier,4
+1.1,4.1,GEVER,Dossier,titel,text,Dossier,6
+1.1,4.1,GEVER,Dossier,id,text,Dossier,8
+1.1,4.1,GEVER,Dossier,entstehungszeitraum,datumstyp 2,Dossier,15
+1.1,4.1,GEVER,Ordner,name,text,Ordner,4
+1.1,4.1,GEVER,Ordnungssystem,name,text,Ordnungssystem,4
+1.1,4.1,GEVER,Ordnungssystemposition,nummer,text,Ordnungssystemposition,4
+1.1,4.1,GEVER,Ordnungssystemposition,titel,text,Ordnungssystemposition,5
+1.1,4.1,GEVER,Ordnungssystemposition,id,text,Ordnungssystemposition,6
+1.1,4.1,GEVER,Paket,paketTyp,text,Paket,7
+1.1,4.1,GEVER,Paket,schemaVersion,text (token),Paket,10
+1.1,4.1,GEVER,Provenienz,aktenbildnerName,text,Provenienz,4
+1.1,4.1,GEVER,Provenienz,registratur,text,Provenienz,9
+1.1,4.1,GEVER,Vorgang,titel,text,Vorgang,4
+1.2.0,5.0,FILES,Ablieferung,ablieferungstyp,xs:token,Ablieferung,5
+1.2.0,5.0,FILES,Ablieferung,ablieferndeStelle,text2,Ablieferung,7
+1.2.0,5.0,FILES,Ablieferung,provenienz,xs:complexType,Ablieferung,16
+1.2.0,5.0,FILES,Arch. Notiz,id,xs:attribute (xs:ID),Arch. Notiz,4
+1.2.0,5.0,FILES,Arch. Notiz,notizDatum,datumTypB,Arch. Notiz,5
+1.2.0,5.0,FILES,Arch. Notiz,notizBeschreibung,text4,Arch. Notiz,7
+1.2.0,5.0,FILES,Arch. Vorgang,vorgangstyp,text1,Arch. Vorgang,4
+1.2.0,5.0,FILES,Arch. Vorgang,beschreibung,text4,Arch. Vorgang,5
+1.2.0,5.0,FILES,Arch. Vorgang,datum,zeitraum,Arch. Vorgang,6
+1.2.0,5.0,FILES,Arch. Vorgang,bearbeiter,text2,Arch. Vorgang,7
+1.2.0,5.0,FILES,Datei,id,xs:attribute (xs:ID),Datei,4
+1.2.0,5.0,FILES,Datei,name,text2,Datei,5
+1.2.0,5.0,FILES,Datei,pruefalgorithmus,xs:token,Datei,7
+1.2.0,5.0,FILES,Datei,pruefsumme,text3,Datei,8
+1.2.0,5.0,FILES,Dokument,id,xs:attribute (xs:ID),Dokument,4
+1.2.0,5.0,FILES,Dokument,titel,text4,Dokument,6
+1.2.0,5.0,FILES,Dokument,erscheinungsform,enumeration,Dokument,8
+1.2.0,5.0,FILES,Dossier,id,xs:attribute (xs:ID),Dossier,4
+1.2.0,5.0,FILES,Dossier,titel,text4,Dossier,8
+1.2.0,5.0,FILES,Dossier,entstehungszeitraum,historischerZeitraum,Dossier,16
+1.2.0,5.0,FILES,Mappe,id,xs:attribute (xs:ID),Mappe,4
+1.2.0,5.0,FILES,Mappe,titel,text4,Mappe,6
+1.2.0,5.0,FILES,Ordner,name,xs:string,Ordner,4
+1.2.0,5.0,FILES,Paket,schemaVersion,xs:attribute (text1),Paket,4
+1.2.0,5.0,FILES,Paket,paketTyp,xs:token,Paket,5
+1.2.0,5.0,FILES,Paket,ablieferung,xs:complexType,Paket,8
+1.2.0,5.0,FILES,Paket,inhaltsverzeichnis,xs:complexType,Paket,9
+1.2.0,5.0,FILES,Provenienz,aktenbildnerName,text2,Provenienz,4
+1.2.0,5.0,GEVER,Ablieferung,ablieferungstyp,xs:token,Ablieferung,5
+1.2.0,5.0,GEVER,Ablieferung,ablieferndeStelle,text2,Ablieferung,7
+1.2.0,5.0,GEVER,Ablieferung,provenienz,xs:complexType,Ablieferung,16
+1.2.0,5.0,GEVER,Ablieferung,ordnungssystem,xs:complexType,Ablieferung,17
+1.2.0,5.0,GEVER,Aktivität,vorschreibung,text3,Aktivität,5
+1.2.0,5.0,GEVER,Arch. Notiz,id,xs:attribute (xs:ID),Arch. Notiz,4
+1.2.0,5.0,GEVER,Arch. Notiz,notizDatum,datumTypB,Arch. Notiz,5
+1.2.0,5.0,GEVER,Arch. Notiz,notizBeschreibung,text4,Arch. Notiz,7
+1.2.0,5.0,GEVER,Arch. Vorgang,vorgangstyp,text1,Arch. Vorgang,4
+1.2.0,5.0,GEVER,Arch. Vorgang,beschreibung,text4,Arch. Vorgang,5
+1.2.0,5.0,GEVER,Arch. Vorgang,datum,zeitraum,Arch. Vorgang,6
+1.2.0,5.0,GEVER,Arch. Vorgang,bearbeiter,text2,Arch. Vorgang,7
+1.2.0,5.0,GEVER,Datei,id,xs:attribute (xs:ID),Datei,4
+1.2.0,5.0,GEVER,Datei,name,text2,Datei,5
+1.2.0,5.0,GEVER,Datei,pruefalgorithmus,xs:token,Datei,7
+1.2.0,5.0,GEVER,Datei,pruefsumme,text3,Datei,8
+1.2.0,5.0,GEVER,Dokument,id,xs:attribute (xs:ID),Dokument,4
+1.2.0,5.0,GEVER,Dokument,titel,text4,Dokument,6
+1.2.0,5.0,GEVER,Dokument,erscheinungsform,enumeration,Dokument,8
+1.2.0,5.0,GEVER,Dossier,id,xs:attribute (xs:ID),Dossier,4
+1.2.0,5.0,GEVER,Dossier,aktenzeichen,text2,Dossier,6
+1.2.0,5.0,GEVER,Dossier,titel,text4,Dossier,8
+1.2.0,5.0,GEVER,Dossier,entstehungszeitraum,historischerZeitraum,Dossier,16
+1.2.0,5.0,GEVER,Mappe,id,xs:attribute (xs:ID),Mappe,4
+1.2.0,5.0,GEVER,Mappe,titel,text4,Mappe,6
+1.2.0,5.0,GEVER,Ordner,name,xs:string,Ordner,4
+1.2.0,5.0,GEVER,Ordnungssystem,name,text2,Ordnungssystem,4
+1.2.0,5.0,GEVER,Ordnungssystem,ordnungssystemposition,xs:complexType,Ordnungssystem,10
+1.2.0,5.0,GEVER,Ordnungssystemposition,id,xs:attribute (xs:ID),Ordnungssystemposition,4
+1.2.0,5.0,GEVER,Ordnungssystemposition,nummer,text1,Ordnungssystemposition,6
+1.2.0,5.0,GEVER,Ordnungssystemposition,titel,text2,Ordnungssystemposition,7
+1.2.0,5.0,GEVER,Paket,schemaVersion,xs:attribute (text1),Paket,4
+1.2.0,5.0,GEVER,Paket,paketTyp,xs:token,Paket,5
+1.2.0,5.0,GEVER,Paket,ablieferung,xs:complexType,Paket,8
+1.2.0,5.0,GEVER,Paket,inhaltsverzeichnis,xs:complexType,Paket,9
+1.2.0,5.0,GEVER,Provenienz,aktenbildnerName,text2,Provenienz,4
+1.2.0,5.0,GEVER,Provenienz,registratur,text2,Provenienz,7
+1.2.0,5.0,GEVER,Vorgang,titel,text3,Vorgang,5
+1.3.0,5.1,FILES,Ablieferung,ablieferungstyp,xs:token,Ablieferung,5
+1.3.0,5.1,FILES,Ablieferung,ablieferndeStelle,text2,Ablieferung,7
+1.3.0,5.1,FILES,Ablieferung,provenienz,xs:complexType,Ablieferung,16
+1.3.0,5.1,FILES,Arch. Notiz,id,xs:attribute (xs:ID),Arch. Notiz,4
+1.3.0,5.1,FILES,Arch. Notiz,notizDatum,datumTypB,Arch. Notiz,5
+1.3.0,5.1,FILES,Arch. Notiz,notizBeschreibung,text4,Arch. Notiz,7
+1.3.0,5.1,FILES,Arch. Vorgang,vorgangstyp,text1,Arch. Vorgang,4
+1.3.0,5.1,FILES,Arch. Vorgang,beschreibung,text4,Arch. Vorgang,5
+1.3.0,5.1,FILES,Arch. Vorgang,datum,zeitraum,Arch. Vorgang,6
+1.3.0,5.1,FILES,Arch. Vorgang,bearbeiter,text2,Arch. Vorgang,7
+1.3.0,5.1,FILES,Datei,id,xs:attribute (xs:ID),Datei,4
+1.3.0,5.1,FILES,Datei,name,text2,Datei,5
+1.3.0,5.1,FILES,Datei,pruefalgorithmus,xs:token,Datei,7
+1.3.0,5.1,FILES,Datei,pruefsumme,text3,Datei,8
+1.3.0,5.1,FILES,Dokument,id,xs:attribute (xs:ID),Dokument,4
+1.3.0,5.1,FILES,Dokument,titel,text4,Dokument,6
+1.3.0,5.1,FILES,Dokument,erscheinungsform,enumeration,Dokument,8
+1.3.0,5.1,FILES,Dossier,id,xs:attribute (xs:ID),Dossier,4
+1.3.0,5.1,FILES,Dossier,titel,text4,Dossier,8
+1.3.0,5.1,FILES,Dossier,entstehungszeitraum,historischerZeitraum,Dossier,16
+1.3.0,5.1,FILES,Mappe,id,xs:attribute (xs:ID),Mappe,4
+1.3.0,5.1,FILES,Mappe,titel,text4,Mappe,6
+1.3.0,5.1,FILES,Ordner,name,xs:string,Ordner,4
+1.3.0,5.1,FILES,Paket,schemaVersion,xs:attribute (text1),Paket,4
+1.3.0,5.1,FILES,Paket,paketTyp,xs:token,Paket,5
+1.3.0,5.1,FILES,Paket,ablieferung,xs:complexType,Paket,8
+1.3.0,5.1,FILES,Paket,inhaltsverzeichnis,xs:complexType,Paket,9
+1.3.0,5.1,FILES,Provenienz,aktenbildnerName,text2,Provenienz,4
+1.3.0,5.1,GEVER,Ablieferung,ablieferungstyp,xs:token,Ablieferung,5
+1.3.0,5.1,GEVER,Ablieferung,ablieferndeStelle,text2,Ablieferung,7
+1.3.0,5.1,GEVER,Ablieferung,provenienz,xs:complexType,Ablieferung,16
+1.3.0,5.1,GEVER,Ablieferung,ordnungssystem,xs:complexType,Ablieferung,17
+1.3.0,5.1,GEVER,Aktivität,vorschreibung,text3,Aktivität,5
+1.3.0,5.1,GEVER,Arch. Notiz,id,xs:attribute (xs:ID),Arch. Notiz,4
+1.3.0,5.1,GEVER,Arch. Notiz,notizDatum,datumTypB,Arch. Notiz,5
+1.3.0,5.1,GEVER,Arch. Notiz,notizBeschreibung,text4,Arch. Notiz,7
+1.3.0,5.1,GEVER,Arch. Vorgang,vorgangstyp,text1,Arch. Vorgang,4
+1.3.0,5.1,GEVER,Arch. Vorgang,beschreibung,text4,Arch. Vorgang,5
+1.3.0,5.1,GEVER,Arch. Vorgang,datum,zeitraum,Arch. Vorgang,6
+1.3.0,5.1,GEVER,Arch. Vorgang,bearbeiter,text2,Arch. Vorgang,7
+1.3.0,5.1,GEVER,Datei,id,xs:attribute (xs:ID),Datei,4
+1.3.0,5.1,GEVER,Datei,name,text2,Datei,5
+1.3.0,5.1,GEVER,Datei,pruefalgorithmus,xs:token,Datei,7
+1.3.0,5.1,GEVER,Datei,pruefsumme,text3,Datei,8
+1.3.0,5.1,GEVER,Dokument,id,xs:attribute (xs:ID),Dokument,4
+1.3.0,5.1,GEVER,Dokument,titel,text4,Dokument,6
+1.3.0,5.1,GEVER,Dokument,erscheinungsform,enumeration,Dokument,8
+1.3.0,5.1,GEVER,Dossier,id,xs:attribute (xs:ID),Dossier,4
+1.3.0,5.1,GEVER,Dossier,aktenzeichen,text2,Dossier,6
+1.3.0,5.1,GEVER,Dossier,titel,text4,Dossier,8
+1.3.0,5.1,GEVER,Dossier,entstehungszeitraum,historischerZeitraum,Dossier,16
+1.3.0,5.1,GEVER,Mappe,id,xs:attribute (xs:ID),Mappe,4
+1.3.0,5.1,GEVER,Mappe,titel,text4,Mappe,6
+1.3.0,5.1,GEVER,Ordner,name,xs:string,Ordner,4
+1.3.0,5.1,GEVER,Ordnungssystem,name,text2,Ordnungssystem,4
+1.3.0,5.1,GEVER,Ordnungssystem,ordnungssystemposition,xs:complexType,Ordnungssystem,10
+1.3.0,5.1,GEVER,Ordnungssystemposition,id,xs:attribute (xs:ID),Ordnungssystemposition,4
+1.3.0,5.1,GEVER,Ordnungssystemposition,nummer,text1,Ordnungssystemposition,6
+1.3.0,5.1,GEVER,Ordnungssystemposition,titel,text2,Ordnungssystemposition,7
+1.3.0,5.1,GEVER,Paket,schemaVersion,xs:attribute (text1),Paket,4
+1.3.0,5.1,GEVER,Paket,paketTyp,xs:token,Paket,5
+1.3.0,5.1,GEVER,Paket,ablieferung,xs:complexType,Paket,8
+1.3.0,5.1,GEVER,Paket,inhaltsverzeichnis,xs:complexType,Paket,9
+1.3.0,5.1,GEVER,Provenienz,aktenbildnerName,text2,Provenienz,4
+1.3.0,5.1,GEVER,Provenienz,registratur,text2,Provenienz,7
+1.3.0,5.1,GEVER,Vorgang,titel,text3,Vorgang,5

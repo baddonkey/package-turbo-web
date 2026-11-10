@@ -1,0 +1,51 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+.session-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+app-workspace {
+  flex: 1;
+  min-height: 0;
+}
+.login-page {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  padding: 24px;
+}
+.login-card {
+  display: grid;
+  gap: 18px;
+  width: min(100%, 380px);
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 12px 36px #173e3712;
+}
+.brand {
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 600;
+}
+form {
+  display: grid;
+  gap: 8px;
+}
+form input,
+form button {
+  min-height: 36px;
+}
+form button {
+  margin-top: 12px;
+}

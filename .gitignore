@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+dist/
+build/
+deployment/
+samples
+de_Benutzerdokumentation_Package_Handler Release 2022 (1).pdf
+docs/img/
+docs/package_handler.md
+.package-turbo-web/

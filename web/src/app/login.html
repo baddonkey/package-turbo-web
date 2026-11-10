@@ -1,0 +1,64 @@
+@if (auth.identity(); as identity) {
+  <div class="session-bar" aria-label="Sitzung">
+    <span>{{ identity.display_name }} ({{ identity.subject }})</span>
+    <button type="button" [disabled]="busy() || !!workspace()?.busy()" (click)="logout()">
+      Abmelden
+    </button>
+    @if (error()) {
+      <span role="alert" class="issue-error">{{ error() }}</span>
+    }
+  </div>
+  <app-workspace />
+} @else {
+  <main class="login-page">
+    <section class="login-card" aria-labelledby="login-title">
+      <div class="brand">Package Turbo</div>
+      <h1 id="login-title">Anmelden</h1>
+      @if (checking()) {
+        <p role="status">Sitzung wird geprüft…</p>
+      } @else {
+        <p>Melden Sie sich an, um den SIP-Arbeitsbereich zu öffnen.</p>
+        @if (auth.expired()) {
+          <p role="alert">
+            Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an. Nicht gespeicherte
+            Änderungen müssen erneut eingegeben werden.
+          </p>
+        }
+        @if (error()) {
+          <p role="alert" class="issue-error">{{ error() }}</p>
+        }
+        <form (ngSubmit)="login()">
+          <label for="username">Benutzername</label>
+          <input
+            id="username"
+            name="username"
+            autocomplete="username"
+            required
+            maxlength="100"
+            [(ngModel)]="username"
+            [disabled]="busy()"
+          />
+          <label for="password">Passwort</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+            maxlength="1024"
+            [(ngModel)]="password"
+            [disabled]="busy()"
+          />
+          <button
+            class="accent-control"
+            type="submit"
+            [disabled]="busy() || !username || !password"
+          >
+            {{ busy() ? 'Anmeldung läuft…' : 'Anmelden' }}
+          </button>
+        </form>
+        <button type="button" [disabled]="busy()" (click)="restore()">Sitzung erneut prüfen</button>
+      }
+    </section>
+  </main>
+}

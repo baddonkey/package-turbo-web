@@ -1,0 +1,123 @@
+:host {
+  display: block;
+}
+ul {
+  margin: 0;
+  padding: 3px 0 0;
+  list-style: none;
+}
+ul:not(:empty) {
+  background: var(--paper);
+}
+li {
+  min-height: 24px;
+  display: grid;
+  align-items: center;
+  min-width: 0;
+}
+.tree-heading,
+.with-columns li:not(.more) {
+  display: grid;
+  grid-template-columns: minmax(0, 38fr) minmax(0, 18fr) minmax(0, 24fr) minmax(0, 20fr);
+}
+.tree-heading {
+  min-height: 47px;
+  align-items: stretch;
+  font-size: 10px;
+  font-weight: 650;
+  background: var(--table-head);
+  border-bottom: 1px solid var(--line);
+}
+.tree-heading span,
+.with-columns li > span {
+  padding: 3px;
+  align-content: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-heading span {
+  border-inline-end: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.tree-name,
+.node {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.tree-name {
+  height: 100%;
+}
+.node,
+.disclosure {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  min-height: 24px;
+  padding: 0 5px 0 0;
+}
+.node {
+  flex: 1;
+  gap: 6px;
+  text-align: start;
+}
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.disclosure {
+  flex: 0 0 24px;
+  width: 24px;
+  padding: 0;
+  text-align: center;
+  color: var(--muted);
+}
+li:not(.selected):hover {
+  background: var(--tab-active);
+}
+li.selected {
+  background: var(--accent);
+  color: white;
+}
+.selected .disclosure {
+  color: white;
+}
+.badge {
+  border-radius: 3px;
+  background: #5e737e;
+  color: white;
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 16px;
+  padding: 0 4px;
+  min-width: 22px;
+  text-align: center;
+}
+.badge[data-kind='ordnungssystem'] {
+  background: #3746a6;
+}
+.badge[data-kind='ordnungssystemposition'] {
+  background: #5c69c2;
+}
+.badge[data-kind='dossier'],
+.badge[data-kind='subdossier'],
+.badge[data-kind='ordner'] {
+  background: #ffac26;
+  color: #241900;
+}
+.badge[data-kind='dokument'] {
+  background: #429d53;
+  color: #102516;
+}
+.badge[data-kind='datei'] {
+  background: #2196ed;
+  color: #0a2039;
+}
+.more button {
+  padding: 0 5px;
+  border: 0;
+  background: transparent;
+  color: var(--link);
+}

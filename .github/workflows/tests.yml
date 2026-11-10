@@ -1,0 +1,64 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.7"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install locked package and test dependencies
+        run: uv sync --locked --extra dev --extra web --extra web-test
+      - name: Download and verify official KOST v1.3 FILES fixture
+        run: uv run --locked --no-sync python tools/prepare_kost_fixture.py
+      - name: Run tests with required conformance fixture
+        env:
+          PACKAGE_TURBO_REQUIRE_KOST_FIXTURE: "1"
+        run: uv run --locked --no-sync python -m pytest -q
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.7"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked service and browser dependencies
+        run: |
+          uv sync --locked --extra web
+          npm ci --prefix web
+      - name: Verify the browser API contract
+        run: |
+          uv run --locked --extra web python tools/export_web_openapi.py
+          npm run generate:api --prefix web
+          git diff --exit-code -- web/openapi.json web/src/app/api.types.ts
+      - name: Test and build the browser app
+        run: |
+          npm test --prefix web -- --watch=false
+          npm run build --prefix web
