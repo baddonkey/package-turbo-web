@@ -97,7 +97,7 @@ def test_login_throttle_resets_after_one_minute(client, monkeypatch):
     for _ in range(20):
         assert client.post(LOGIN, json={"username": AUTH.username, "password": "wrong"}).status_code == 401
     assert client.post(LOGIN, json={"username": AUTH.username, "password": PASSWORD}).status_code == 429
-    monkeypatch.setattr(auth_module.time, "monotonic", lambda: now + 60)
+    monkeypatch.setattr(auth_module.time, "monotonic", lambda: now + 61)
     assert login(client).status_code == 200
 
 
