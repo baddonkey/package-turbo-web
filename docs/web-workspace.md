@@ -43,6 +43,11 @@ environment variable is already set. This private shell file should export
 permissions `600`, and live in a directory with permissions `700`. For a direct
 Uvicorn launch, source it first with
 `. "$HOME/.config/package-turbo-web/login.env"`.
+On Windows, `.\start-web.ps1` also reads those two assignments from the same
+file when neither variable is set. Use one `NAME=value` or `export NAME=value`
+assignment per line; single- or double-quoted values are supported, but shell
+expansion and other shell commands are not. Protect the file with Windows
+account permissions.
 
 Sessions use random opaque cookies, expire after eight hours, and are revoked
 on logout. Only token hashes are stored in the service SQLite database; sessions

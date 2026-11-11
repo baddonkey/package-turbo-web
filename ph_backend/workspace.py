@@ -15,6 +15,10 @@ from .processing import (MAX_METADATA_BYTES, current_control, digest_bytes, prot
                          read_bytes, run_background)
 
 
+class ExternalMetadataChangeError(AuditError):
+    """The metadata no longer matches the workspace's recorded baseline."""
+
+
 def companion_directory(package_root: Path) -> Path:
     root = Path(package_root).resolve()
     return root.with_name(root.name + ".package-turbo")
@@ -126,7 +130,10 @@ class MetadataWorkspace:
             raise AuditError("Workspace baseline does not match preservation history.")
         if (self._hash(current) != expected
             or getattr(self, "_baseline_digest", expected) != expected):
-            raise AuditError("Metadata changed outside this workspace. Reopen read-only and resolve the conflict.")
+            raise ExternalMetadataChangeError(
+                "Die Metadaten wurden ausserhalb dieses Arbeitsbereichs geändert und stimmen nicht mehr "
+                "mit der SIP-Erhaltungshistorie überein."
+            )
         return current
 
     def check(self) -> None:

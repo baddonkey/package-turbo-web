@@ -447,6 +447,11 @@
   padding: 0;
   text-align: start;
   color: var(--link);
+  font-weight: 600;
+}
+.link:disabled {
+  color: #899793;
+  opacity: 1;
 }
 .link:hover:not(:disabled) {
   text-decoration: underline;
