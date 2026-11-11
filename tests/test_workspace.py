@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from ph_backend.audit import AuditError
-from ph_backend.workspace import MetadataWorkspace, companion_directory
+from ph_backend.workspace import ExternalMetadataChangeError, MetadataWorkspace, companion_directory
 
 BEFORE = b'<paket><dossier id="_dos1"><titel>Old title</titel></dossier></paket>'
 AFTER = BEFORE.replace(b"Old title", b"New title")
@@ -62,7 +62,7 @@ def test_external_changes_are_not_overwritten(tmp_path):
     workspace = _workspace(tmp_path)
     external = BEFORE.replace(b"Old title", b"External edit")
     workspace.metadata_path.write_bytes(external)
-    with pytest.raises(AuditError, match="outside"):
+    with pytest.raises(ExternalMetadataChangeError):
         workspace.save(AFTER)
     assert workspace.metadata_path.read_bytes() == external
     assert workspace.journal.records() == []
@@ -73,7 +73,7 @@ def test_another_workspace_commit_invalidates_stale_session(tmp_path):
     second = MetadataWorkspace(first.metadata_path, first.metadata_path.parent.parent,
                                operator="other-operator", software_version="0.1.0")
     assert first.save(AFTER)
-    with pytest.raises(AuditError, match="outside"):
+    with pytest.raises(ExternalMetadataChangeError):
         second.save(BEFORE.replace(b"Old title", b"Stale session overwrite"))
     assert first.metadata_path.read_bytes() == AFTER
     assert first.journal.verify().sequence == 2

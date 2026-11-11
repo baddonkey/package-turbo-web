@@ -29,7 +29,7 @@ from ph_backend.processing import digest_bytes
 from ph_backend.retention import RetentionManager
 from ph_backend.sip import InvalidPackageError
 from ph_backend.validation import CHECKS, Validator
-from ph_backend.workspace import MetadataWorkspace, companion_directory
+from ph_backend.workspace import ExternalMetadataChangeError, MetadataWorkspace, companion_directory
 
 from .actions import FILE_ACTIONS, content_entry, file_action, metadata_action
 from .auth import AuthSettings, LocalAuth
@@ -88,7 +88,7 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
     @app.exception_handler(AuditError)
     async def audit_error(_request, exc):
         LOG.warning("Konflikt im SIP-Arbeitsbereich: %s", exc)
-        if str(exc).startswith("Die Metadaten wurden ausserhalb dieses Arbeitsbereichs geändert"):
+        if isinstance(exc, ExternalMetadataChangeError):
             detail = (
                 "Das SIP kann nicht geöffnet werden, weil metadata.xml ausserhalb dieses Arbeitsbereichs geändert "
                 "wurde und nicht mehr mit der Erhaltungshistorie übereinstimmt. Der schreibgeschützte Modus umgeht "
