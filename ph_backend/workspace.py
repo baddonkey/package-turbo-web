@@ -126,7 +126,10 @@ class MetadataWorkspace:
             raise AuditError("Workspace baseline does not match preservation history.")
         if (self._hash(current) != expected
             or getattr(self, "_baseline_digest", expected) != expected):
-            raise AuditError("Metadata changed outside this workspace. Reopen read-only and resolve the conflict.")
+            raise AuditError(
+                "Die Metadaten wurden ausserhalb dieses Arbeitsbereichs geändert und stimmen nicht mehr "
+                "mit der SIP-Erhaltungshistorie überein."
+            )
         return current
 
     def check(self) -> None:

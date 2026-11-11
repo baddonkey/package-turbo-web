@@ -87,8 +87,17 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
 
     @app.exception_handler(AuditError)
     async def audit_error(_request, exc):
-        LOG.warning("Preservation workspace conflict: %s", exc)
-        return JSONResponse({"detail": "The preservation workspace could not be verified or updated."}, status_code=409)
+        LOG.warning("Konflikt im SIP-Arbeitsbereich: %s", exc)
+        if str(exc).startswith("Die Metadaten wurden ausserhalb dieses Arbeitsbereichs geändert"):
+            detail = (
+                "Das SIP kann nicht geöffnet werden, weil metadata.xml ausserhalb dieses Arbeitsbereichs geändert "
+                "wurde und nicht mehr mit der Erhaltungshistorie übereinstimmt. Der schreibgeschützte Modus umgeht "
+                "diese Integritätsprüfung nicht. Stellen Sie metadata.xml aus einer vertrauenswürdigen Kopie wieder "
+                "her oder klären Sie die externe Änderung, bevor Sie das Paket erneut öffnen."
+            )
+        else:
+            detail = "Der SIP-Arbeitsbereich konnte nicht überprüft oder aktualisiert werden."
+        return JSONResponse({"detail": detail}, status_code=409)
 
     @app.exception_handler(PackageCreationError)
     @app.exception_handler(InvalidPackageError)
@@ -125,7 +134,11 @@ def create_app(settings: Settings | None = None, static_dir: Path | None = None,
                 if has_file_draft(metadata.journal):
                     FileWorkspace(metadata).discard()
             if if_match is not None and if_match != current.etag:
-                raise WebError(412, "This SIP changed. Reload the workspace before continuing.")
+                raise WebError(
+                    412,
+                    "Die SIP-Metadaten wurden ausserhalb dieses Arbeitsbereichs geändert. "
+                    "Laden Sie den Arbeitsbereich neu, bevor Sie fortfahren.",
+                )
             yield current
 
     def mutation(request: Request, package_id: UUID, node_id: str, if_match: str, response: Response, event: str,
