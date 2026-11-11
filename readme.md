@@ -6,7 +6,13 @@ Package Turbo is experimental.
 
 ## Browser workspace
 
-Requires Python 3.11 or newer, uv, and Node.js 24 LTS. From the repository root:
+Globally install
+```sh
+pip install --user uv
+```
+
+Requires Python 3.11 or newer, uv, and Node.js 24 LTS. On macOS or Linux, run
+these commands from the repository root:
 
 ```sh
 uv sync --locked --extra web
@@ -20,6 +26,21 @@ PACKAGE_TURBO_OPERATOR="Your name" \
 PACKAGE_TURBO_STATIC_DIR=web/dist/package-turbo-web/browser \
 uv run --locked --extra web uvicorn ph_web.app:app --host 127.0.0.1 --port 8000
 ```
+
+On Windows 11, open PowerShell in the repository root. Generate the password
+hash interactively, then set the login details and start the workspace. The
+script installs the locked dependencies, builds the browser app, and serves it
+on port 8000:
+
+```powershell
+$env:PACKAGE_TURBO_LOGIN_USERNAME = "archivist"
+uv run --locked --extra web python -m ph_web.auth
+$env:PACKAGE_TURBO_LOGIN_PASSWORD_HASH = 'paste-generated-hash-here'
+$env:PACKAGE_TURBO_OPERATOR = "Your name"
+.\start-web.ps1
+```
+
+Use `.\start-web.ps1 -Port 8001` to choose another port.
 
 Open [Package Turbo](http://127.0.0.1:8000) or the
 [interactive API docs](http://127.0.0.1:8000/docs). The API contract is available at
