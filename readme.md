@@ -6,6 +6,9 @@ Package Turbo is experimental.
 
 ## Browser workspace
 
+See the illustrated [user manual](docs/manual/user-manual.html) and
+[gallery of 30 screenshots](docs/manual/gallery.html) for step-by-step browser workflows.
+
 Globally install
 ```sh
 pip install --user uv
