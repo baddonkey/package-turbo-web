@@ -1,8 +1,10 @@
-# package-turbo
+# package-turbo-web
 
 An independent workspace for creating, editing and validating eCH-0160
 Submission Information Packages (SIPs), built with FastAPI and Angular.
 Package Turbo is experimental.
+
+![Package Turbo workspace showing the classification and dossier navigators with nested files and documents](docs/manual/screenshots/07-imported-sip.png)
 
 ## Browser workspace
 

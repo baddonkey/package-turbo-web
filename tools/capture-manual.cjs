@@ -31,6 +31,17 @@ async function main() {
   page.setDefaultTimeout(12000);
   const shot = async name => { await page.waitForTimeout(600); await page.screenshot({path:path.join(output,`${name}.png`)}); console.log(name); };
   const button = name => page.getByRole('button',{name,exact:true});
+  const expandTree = async () => {
+    // Expanding a row loads its children asynchronously. Re-query after each
+    // click so every newly revealed level is included before the screenshot.
+    for (let i=0; i<80; i++) {
+      const collapsed = page.locator('.lower-navigator app-navigator-tree button.disclosure[aria-expanded="false"]');
+      if (!await collapsed.count()) break;
+      await collapsed.first().evaluate(button => button.click());
+      await page.waitForTimeout(500);
+      if (await collapsed.first().getAttribute('aria-expanded') !== 'true') break;
+    }
+  };
   await page.goto('http://127.0.0.1:7011');
   await button('Anmelden').waitFor();
   await shot('01-sign-in');
@@ -59,7 +70,13 @@ async function main() {
   await page.locator('dialog').waitFor({state:'hidden',timeout:120000});
   await shot('07-imported-sip');
   fs.writeFileSync(path.join(root,'.package-turbo-web/manual-dom.txt'),await page.locator('body').innerText());
-  for (const [label,name] of [['Paketinhalt','08-package-content'],['Dossiers','09-dossiers']]) { await button(label).click(); await shot(name); }
+  await expandTree();
+  await shot('07-imported-sip');
+  for (const [label,name] of [['Paketinhalt','08-package-content'],['Dossiers','09-dossiers']]) {
+    await button(label).click();
+    await expandTree();
+    await shot(name);
+  }
   await button('Vollständig validieren').click();
   await page.waitForTimeout(2000);
   await shot('10-validation');
